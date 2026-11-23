@@ -13,6 +13,15 @@ const supabaseAdmin = createClient(
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
 );
 
+function generateCrewCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let suffix = '';
+  for (let i = 0; i < 6; i++) {
+    suffix += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return `TURN-${suffix}`;
+}
+
 serve(async (req) => {
   const signature = req.headers.get('stripe-signature');
   if (!signature || !webhookSecret) {
@@ -33,12 +42,34 @@ serve(async (req) => {
       const session = event.data.object as Stripe.Checkout.Session;
       const userId = session.metadata?.userId;
       const plan = session.metadata?.plan || 'solo';
+      const email = session.customer_details?.email || session.customer_email || null;
 
       if (userId) {
         await supabaseAdmin
           .from('profiles')
-          .update({ tier: 'tour_pro' })
-          .eq('id', userId);
+          .upsert({ id: userId, email, tier: 'tour_pro' }, { onConflict: 'id' });
+
+        if (plan === 'foursome') {
+          const inviteCode = generateCrewCode();
+          const { data: passRow } = await supabaseAdmin
+            .from('crew_passes')
+            .insert({
+              owner_id: userId,
+              invite_code: inviteCode,
+              max_seats: 4,
+              active: true,
+            })
+            .select()
+            .single();
+
+          if (passRow) {
+            await supabaseAdmin.from('crew_pass_seats').insert({
+              pass_id: passRow.id,
+              member_id: userId,
+              member_email: email,
+            });
+          }
+        }
       }
     }
 
@@ -51,6 +82,26 @@ serve(async (req) => {
           .from('profiles')
           .update({ tier: 'clubhouse' })
           .eq('id', userId);
+
+        const { data: ownedPasses } = await supabaseAdmin
+          .from('crew_passes')
+          .select('id')
+          .eq('owner_id', userId);
+
+        if (ownedPasses && ownedPasses.length > 0) {
+          const passIds = ownedPasses.map((p) => p.id);
+          await supabaseAdmin.from('crew_passes').update({ active: false }).in('id', passIds);
+
+          const { data: seats } = await supabaseAdmin
+            .from('crew_pass_seats')
+            .select('member_id')
+            .in('pass_id', passIds);
+
+          if (seats && seats.length > 0) {
+            const memberIds = seats.map((s) => s.member_id);
+            await supabaseAdmin.from('profiles').update({ tier: 'clubhouse' }).in('id', memberIds);
+          }
+        }
       }
     }
 

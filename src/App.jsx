@@ -12,13 +12,17 @@ import AuthModal from './components/AuthModal';
 export default function App() {
   const { theme, toggleTheme } = useTheme();
   const { user, profile, signOut, refreshProfile } = useAuth();
-  const [activeTab, setActiveTab] = useState('course');
+  const [activeTab, setActiveTab] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('invite') || params.get('crew') ? 'foursome' : 'course';
+  });
   const [demoPro, setDemoPro] = useState(false);
   const [paywallFeature, setPaywallFeature] = useState(null);
-  const [selectedPlan, setSelectedPlan] = useState('solo'); // 'solo' ($119.99/yr) | 'foursome' ($299.99/yr)
+  const [selectedPlan, setSelectedPlan] = useState('solo');
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
   const [upgradeBanner, setUpgradeBanner] = useState('');
+  const [pendingCrewCode, setPendingCrewCode] = useState(() => new URLSearchParams(window.location.search).get('crew') || '');
   const [authOpen, setAuthOpen] = useState(false);
   const [wearableOpen, setWearableOpen] = useState(false);
 
@@ -42,6 +46,31 @@ export default function App() {
       window.history.replaceState({}, '', window.location.pathname);
     }
   }, [refreshProfile]);
+
+  // Auto-claim a Foursome Crew Pass seat when ?crew=TURN-XXXXXX is in the URL
+  useEffect(() => {
+    if (!pendingCrewCode) return;
+    if (!user?.id) {
+      setUpgradeBanner(`Sign in or create a free account to claim your Tour Pro seat (${pendingCrewCode}).`);
+      setAuthOpen(true);
+      return;
+    }
+
+    supabase
+      .rpc('claim_crew_seat', { p_invite_code: pendingCrewCode })
+      .then(({ data, error }) => {
+        if (error) {
+          setUpgradeBanner(error.message);
+        } else if (data?.ok) {
+          setUpgradeBanner(data.message || 'Foursome Crew Pass seat claimed! Tour Pro unlocked.');
+          refreshProfile?.();
+        } else {
+          setUpgradeBanner(data?.error || 'Could not claim Crew Pass seat.');
+        }
+        setPendingCrewCode('');
+        window.history.replaceState({}, '', window.location.pathname);
+      });
+  }, [pendingCrewCode, user?.id, refreshProfile]);
 
   const handleStartCheckout = async () => {
     setCheckoutError('');
@@ -70,7 +99,6 @@ export default function App() {
         throw new Error('No checkout URL returned from server');
       }
     } catch (err) {
-      // Fallback preview mode if Stripe Edge Function secrets are not configured yet
       setCheckoutError(err.message);
       setDemoPro(true);
     } finally {
@@ -178,7 +206,13 @@ export default function App() {
           />
         )}
         {activeTab === 'bag' && <StockBag clubs={clubs} setClubs={setClubs} />}
-        {activeTab === 'foursome' && <FoursomeHub />}
+        {activeTab === 'foursome' && (
+          <FoursomeHub
+            isPro={isPro}
+            onOpenPaywall={(feat) => { setSelectedPlan('foursome'); setCheckoutError(''); setPaywallFeature(feat); }}
+            onRequireAuth={() => setAuthOpen(true)}
+          />
+        )}
         {activeTab === 'prep' && <PrepWardrobe isPro={isPro} onOpenPaywall={(feat) => { setCheckoutError(''); setPaywallFeature(feat); }} />}
 
         <div className="text-center pb-24 pt-2">
