@@ -1,5 +1,5 @@
 ﻿import { useState } from 'react';
-import { Sun, Moon, Shirt, Compass, Briefcase, Users, Crown, LogIn, LogOut } from 'lucide-react';
+import { Sun, Moon, Shirt, Compass, Briefcase, Users, Crown, LogIn, LogOut, Watch, Glasses, X, ShieldCheck, Check } from 'lucide-react';
 import { useTheme } from './context/ThemeContext';
 import { useAuth } from './context/AuthContext';
 import PrepWardrobe from './pages/PrepWardrobe';
@@ -14,7 +14,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('course');
   const [demoPro, setDemoPro] = useState(false);
   const [paywallFeature, setPaywallFeature] = useState(null);
+  const [selectedPlan, setSelectedPlan] = useState('solo'); // 'solo' ($119.99/yr) | 'foursome' ($299.99/yr)
   const [authOpen, setAuthOpen] = useState(false);
+  const [wearableOpen, setWearableOpen] = useState(false);
 
   const [clubs, setClubs] = useState(() => {
     try {
@@ -25,7 +27,30 @@ export default function App() {
     }
   });
 
+  // Dedicated /privacy-policy compliance route for Solis Noir LLC
+  if (window.location.pathname === '/privacy-policy') {
+    return (
+      <div className="min-h-screen max-w-xl mx-auto px-5 py-10 space-y-5">
+        <div className="flex items-center justify-between border-b pb-4" style={{ borderColor: 'var(--border-subtle)' }}>
+          <div>
+            <h1 className="text-xl font-bold">The Turn — Privacy Policy</h1>
+            <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Operated by Solis Noir LLC • Effective November 2026</p>
+          </div>
+          <a href="/" className="text-xs font-semibold px-3 py-2 rounded-xl border" style={{ borderColor: 'var(--border-subtle)' }}>
+            Back to App
+          </a>
+        </div>
+        <div className="space-y-3 text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+          <p><strong style={{ color: 'var(--text-primary)' }}>1. Data We Collect:</strong> Account email, display name, custom golf club stock yardages, wardrobe items, and optional GPS coordinates used solely to fetch local course weather, dew point, wind, and elevation.</p>
+          <p><strong style={{ color: 'var(--text-primary)' }}>2. Wearables & SMS Invites:</strong> Optional Apple Watch, Garmin, and Meta smart glasses integrations read your stock yardages and active hole notes on-demand. Foursome SMS links are initiated directly from your device.</p>
+          <p><strong style={{ color: 'var(--text-primary)' }}>3. Data Security & Deletion:</strong> All user records are stored with Row-Level Security via Supabase. You may request account or data deletion anytime by contacting Solis Noir LLC.</p>
+        </div>
+      </div>
+    );
+  }
+
   const isPro = profile?.tier === 'tour_pro' || demoPro;
+  const leadClub = clubs[1] || clubs[0];
 
   return (
     <div className="min-h-screen max-w-md mx-auto flex flex-col">
@@ -87,31 +112,153 @@ export default function App() {
       </header>
 
       <main className="flex-1 px-4 pt-4">
-        {activeTab === 'course' && <CourseLayout clubs={clubs} isPro={isPro} onOpenPaywall={setPaywallFeature} />}
+        {activeTab === 'course' && (
+          <CourseLayout
+            clubs={clubs}
+            isPro={isPro}
+            onOpenPaywall={setPaywallFeature}
+            onOpenWearable={() => setWearableOpen(true)}
+          />
+        )}
         {activeTab === 'bag' && <StockBag clubs={clubs} setClubs={setClubs} />}
         {activeTab === 'foursome' && <FoursomeHub />}
         {activeTab === 'prep' && <PrepWardrobe isPro={isPro} onOpenPaywall={setPaywallFeature} />}
+
+        <div className="text-center pb-24 pt-2">
+          <a href="/privacy-policy" className="text-[11px] inline-flex items-center gap-1 opacity-60 hover:opacity-100">
+            <ShieldCheck size={12} /> Solis Noir LLC • Privacy Policy
+          </a>
+        </div>
       </main>
 
       {authOpen && <AuthModal onClose={() => setAuthOpen(false)} />}
 
-      {paywallFeature && (
-        <div className="fixed inset-0 z-50 bg-black/65 flex items-end justify-center p-4">
+      {/* Wearable HUD Simulator Modal */}
+      {wearableOpen && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
           <div className="w-full max-w-md rounded-2xl p-5 border space-y-4" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
-            <div className="flex items-center gap-2 text-amber-500 font-semibold text-sm">
-              <Crown size={18} /> Unlock Tour Pro
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent-gold)' }}>
+                Wearable Caddie Preview
+              </span>
+              <button onClick={() => setWearableOpen(false)}><X size={18} /></button>
             </div>
-            <h3 className="text-lg font-bold">{paywallFeature}</h3>
-            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-              Upgrade to Tour Pro ($49.99/yr) for full-bag atmospheric shot simulations, dew-point rollout adjustments, AI flat-lay closet photos, and Apple Watch / Meta Glasses caddie sync.
-            </p>
-            <div className="flex gap-2">
+
+            <div className="p-4 rounded-2xl border space-y-1.5" style={{ backgroundColor: '#0B0D0C', borderColor: '#2B352F', color: '#F3F4F1' }}>
+              <div className="flex items-center justify-between text-[11px] text-emerald-400 font-mono">
+                <span className="flex items-center gap-1"><Watch size={13} /> APPLE WATCH • LIVE ACTIVITY</span>
+                <span>HOLE 4</span>
+              </div>
+              <div className="text-base font-bold">{leadClub?.club_type} • {leadClub?.carry_yards}y Stock</div>
+              <div className="text-xs text-zinc-400">Leaves 148y approach • Favor left-center fairway</div>
+            </div>
+
+            <div className="p-4 rounded-2xl border space-y-1.5" style={{ backgroundColor: '#0B0D0C', borderColor: '#2B352F', color: '#F3F4F1' }}>
+              <div className="flex items-center justify-between text-[11px] text-amber-400 font-mono">
+                <span className="flex items-center gap-1"><Glasses size={13} /> META RAY-BAN • VOICE & HUD</span>
+                <span>HANDS-FREE</span>
+              </div>
+              <div className="text-xs italic text-zinc-300">&ldquo;Hey Meta, ask The Turn what club I&apos;m hitting.&rdquo;</div>
+              <div className="text-xs text-emerald-400">
+                &ldquo;Pull {leadClub?.club_type}. Current wind and dew point keep your rollout short of the right bunker.&rdquo;
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tour Pro ($119.99/yr) & Foursome Crew Pass ($299.99/yr) Paywall Sheet */}
+      {paywallFeature && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-2xl p-5 border space-y-4" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-amber-500 font-semibold text-xs uppercase tracking-wider">
+                <Crown size={16} /> Tour Pro Membership
+              </div>
+              <button onClick={() => setPaywallFeature(null)} className="p-1 opacity-75 hover:opacity-100">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div>
+              <h3 className="text-lg font-bold">{paywallFeature}</h3>
+              <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
+                Full-bag atmospheric shot simulations, live dew-point & wind physics, custom course/hole builder, Hard Mode trip packing, and Apple Watch / Meta Glasses sync.
+              </p>
+            </div>
+
+            {/* Plan Selector Cards */}
+            <div className="space-y-2.5">
+              {/* Individual Tour Pro Plan */}
+              <button
+                type="button"
+                onClick={() => setSelectedPlan('solo')}
+                className="w-full text-left p-3.5 rounded-xl border transition flex items-center justify-between"
+                style={{
+                  backgroundColor: 'var(--bg-elevated)',
+                  borderColor: selectedPlan === 'solo' ? 'var(--accent-emerald)' : 'var(--border-subtle)',
+                  borderWidth: selectedPlan === 'solo' ? '2px' : '1px',
+                }}
+              >
+                <div>
+                  <div className="font-bold text-sm flex items-center gap-2">
+                    Tour Pro Annual
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-700/20 text-emerald-500">
+                      14-Day Free Trial
+                    </span>
+                  </div>
+                  <div className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+                    1 golfer • Unlimited bag, courses & wearables ($14.99/mo billed monthly)
+                  </div>
+                </div>
+                <div className="text-right shrink-0 ml-2">
+                  <div className="font-mono font-bold text-base">$119.99</div>
+                  <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>per year</div>
+                </div>
+              </button>
+
+              {/* 4-Player Foursome Crew Pass */}
+              <button
+                type="button"
+                onClick={() => setSelectedPlan('foursome')}
+                className="w-full text-left p-3.5 rounded-xl border transition flex items-center justify-between"
+                style={{
+                  backgroundColor: 'var(--bg-elevated)',
+                  borderColor: selectedPlan === 'foursome' ? 'var(--accent-gold)' : 'var(--border-subtle)',
+                  borderWidth: selectedPlan === 'foursome' ? '2px' : '1px',
+                }}
+              >
+                <div>
+                  <div className="font-bold text-sm flex items-center gap-2">
+                    Foursome Crew Pass
+                    <span
+                      className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full"
+                      style={{ backgroundColor: 'var(--accent-gold)', color: '#111412' }}
+                    >
+                      4 Seats • Save $180
+                    </span>
+                  </div>
+                  <div className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+                    4 Tour Pro accounts (~$75/player) + shared crew courses & live bet ledger
+                  </div>
+                </div>
+                <div className="text-right shrink-0 ml-2">
+                  <div className="font-mono font-bold text-base" style={{ color: 'var(--accent-gold)' }}>$299.99</div>
+                  <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>per year</div>
+                </div>
+              </button>
+            </div>
+
+            <div className="flex gap-2 pt-1">
               <button
                 onClick={() => { setDemoPro(true); setPaywallFeature(null); }}
-                className="flex-1 py-3 rounded-xl font-semibold text-sm text-white"
+                className="flex-1 py-3 rounded-xl font-semibold text-sm text-white flex items-center justify-center gap-1.5"
                 style={{ backgroundColor: 'var(--accent-emerald)' }}
               >
-                Start 14-Day Free Trial
+                <Check size={16} />
+                {selectedPlan === 'solo'
+                  ? 'Start 14-Day Trial ($119.99/yr)'
+                  : 'Start Foursome Trial ($299.99/yr)'}
               </button>
               <button
                 onClick={() => setPaywallFeature(null)}
