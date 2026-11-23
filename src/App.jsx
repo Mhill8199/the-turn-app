@@ -8,6 +8,7 @@ import CourseLayout from './pages/CourseLayout';
 import StockBag, { DEFAULT_CUSTOM_BAG } from './pages/StockBag';
 import FoursomeHub from './pages/FoursomeHub';
 import AuthModal from './components/AuthModal';
+import OnboardingModal from './components/OnboardingModal';
 
 export default function App() {
   const { theme, toggleTheme } = useTheme();
@@ -27,6 +28,11 @@ export default function App() {
   const [wearableOpen, setWearableOpen] = useState(false);
   const [tokenCopied, setTokenCopied] = useState(false);
   const [tokenStatus, setTokenStatus] = useState('');
+  const [onboardingOpen, setOnboardingOpen] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('invite') || params.get('crew') || params.get('upgrade')) return false;
+    return localStorage.getItem('the-turn-onboarded') !== 'true';
+  });
 
   const [clubs, setClubs] = useState(() => {
     try {
@@ -248,6 +254,15 @@ export default function App() {
           </a>
         </div>
       </main>
+
+      {onboardingOpen && (
+        <OnboardingModal
+          clubs={clubs}
+          setClubs={setClubs}
+          onComplete={() => { setOnboardingOpen(false); setActiveTab('course'); }}
+          onClose={() => { localStorage.setItem('the-turn-onboarded', 'true'); setOnboardingOpen(false); }}
+        />
+      )}
 
       {authOpen && <AuthModal onClose={() => setAuthOpen(false)} />}
 
