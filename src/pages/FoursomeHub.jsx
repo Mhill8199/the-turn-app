@@ -2,14 +2,83 @@ import { useState, useEffect } from 'react';
 import { Send, Share2, Check, Shirt, Trophy, Receipt, Award, Cloud, UserPlus, Crown, Ticket } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
+import { COURSE_PRESETS } from '../lib/weatherPhysics';
+
+function computeLiveRoundStats() {
+  try {
+    const scoresMap = JSON.parse(localStorage.getItem('the-turn-scores-v2') || '{}');
+    const customCourses = JSON.parse(localStorage.getItem('the-turn-custom-courses') || '[]');
+    const allCourses = [...customCourses, ...COURSE_PRESETS];
+
+    let bestStats = null;
+
+    for (const [courseKey, holeMap] of Object.entries(scoresMap)) {
+      if (!holeMap || typeof holeMap !== 'object') continue;
+      const holeNums = Object.keys(holeMap).map(Number).filter((n) => !Number.isNaN(n));
+      if (holeNums.length === 0) continue;
+
+      const matchedCourse = allCourses.find((c) => c.id === courseKey);
+      let totalStrokes = 0;
+      let totalPutts = 0;
+      let girHits = 0;
+      let firHits = 0;
+      let firEligible = 0;
+
+      for (const hNum of holeNums) {
+        const holeMeta = matchedCourse?.holes?.find((h) => h.number === hNum) || { par: 4 };
+        const entry = holeMap[hNum];
+        const st = typeof entry === 'number' ? entry : Number(entry?.strokes ?? holeMeta.par);
+        const pt = typeof entry === 'number' ? 2 : Number(entry?.putts ?? 2);
+        const isGir =
+          typeof entry === 'number'
+            ? st - pt <= holeMeta.par - 2
+            : entry?.gir !== undefined
+            ? Boolean(entry.gir)
+            : st - pt <= holeMeta.par - 2;
+        const firVal = typeof entry === 'number' ? 'hit' : entry?.fir;
+
+        totalStrokes += st;
+        totalPutts += pt;
+        if (isGir) girHits += 1;
+        if (holeMeta.par > 3) {
+          firEligible += 1;
+          if (firVal === 'hit') firHits += 1;
+        }
+      }
+
+      const holesCount = holeNums.length;
+      const girPct = Math.round((girHits / holesCount) * 100);
+      const firPct = firEligible > 0 ? Math.round((firHits / firEligible) * 100) : null;
+
+      if (!bestStats || holesCount >= bestStats.holesCount) {
+        bestStats = {
+          holesCount,
+          totalStrokes,
+          totalPutts,
+          girHits,
+          girPct,
+          firHits,
+          firEligible,
+          firPct,
+          courseName: matchedCourse?.name || null,
+        };
+      }
+    }
+
+    return bestStats;
+  } catch {
+    return null;
+  }
+}
 
 export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAuth }) {
   const { user, refreshProfile } = useAuth();
   const initialInviteId = new URLSearchParams(window.location.search).get('invite');
   const initialLockedFit = localStorage.getItem('the-turn-locked-fit') || 'Navy Polo - Stone Shorts - FJ White';
+  const liveStats = computeLiveRoundStats();
 
   const [roundId, setRoundId] = useState(initialInviteId);
-  const [course, setCourse] = useState('Dos Lagos Golf Club');
+  const [course, setCourse] = useState(liveStats?.courseName || 'Dos Lagos Golf Club');
   const [teeTime, setTeeTime] = useState('Saturday - 7:00 AM');
   const [sideGame, setSideGame] = useState('$5 Nassau (Auto-Press)');
   const [skinValue, setSkinValue] = useState(5);
@@ -29,7 +98,20 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
   const [joinHcp, setJoinHcp] = useState(12);
 
   const [players, setPlayers] = useState([
-    { id: '1', name: 'You', status: 'IN', fit: initialLockedFit, tee: 'Blue', hcp: 10, skins: 2, score: 78 },
+    {
+      id: '1',
+      name: 'You',
+      status: 'IN',
+      fit: initialLockedFit,
+      tee: 'Blue',
+      hcp: 10,
+      skins: 2,
+      score: liveStats ? liveStats.totalStrokes : 78,
+      putts: liveStats ? liveStats.totalPutts : null,
+      girPct: liveStats ? liveStats.girPct : null,
+      firPct: liveStats ? liveStats.firPct : null,
+      holesCount: liveStats ? liveStats.holesCount : null,
+    },
     { id: '2', name: 'Jason', status: 'IN', fit: 'Grey Polo - Black Pants - Jordan Low', tee: 'Blue', hcp: 14, skins: 1, score: 81 },
     { id: '3', name: 'Rylie', status: 'IN', fit: 'White Polo - Navy Shorts', tee: 'Blue', hcp: 8, skins: 2, score: 79 },
     { id: '4', name: 'Ryan', status: 'MAYBE', fit: 'Pending fit lock', tee: 'Blue', hcp: 18, skins: 0, score: 84 },
@@ -313,7 +395,11 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
         const netScore = p.score - playingStrokes;
         const skinNet = p.skins * skinValue * (activeCount - 1) - (totalSkins - p.skins) * skinValue;
         const finalNet = skinNet - perPlayerTab;
-        return `${p.name} (HCP ${p.hcp}): Gross ${p.score} / Net ${netScore} (${p.skins} skins | Net ${finalNet >= 0 ? `+$${finalNet}` : `-$${Math.abs(finalNet)}`})`;
+        const statDetail =
+          p.id === '1' && liveStats
+            ? ` | GIR ${liveStats.girPct}% | FIR ${liveStats.firPct !== null ? `${liveStats.firPct}%` : 'N/A'} | Putts ${liveStats.totalPutts} (${liveStats.holesCount}h)`
+            : '';
+        return `${p.name} (HCP ${p.hcp}): Gross ${p.score} / Net ${netScore}${statDetail} (${p.skins} skins | Net ${finalNet >= 0 ? `+$${finalNet}` : `-$${Math.abs(finalNet)}`})`;
       })
       .join('\n');
 
@@ -325,6 +411,38 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
 
   return (
     <div className="space-y-4 pb-24">
+      {/* Live Scorecard Stats Banner (Total Strokes, GIR%, FIR%, Putts) */}
+      {liveStats && (
+        <div className="rounded-2xl p-3.5 border space-y-2" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-emerald)' }}>
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-semibold uppercase tracking-wider" style={{ color: 'var(--accent-emerald)' }}>
+              Your Live Round Stats ({liveStats.holesCount} Holes Logged)
+            </span>
+            <span className="font-mono text-[11px]" style={{ color: 'var(--accent-gold)' }}>
+              Synced to Recap
+            </span>
+          </div>
+          <div className="grid grid-cols-4 gap-1.5 text-center text-xs">
+            <div className="p-2 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
+              <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Strokes</div>
+              <div className="font-mono font-bold">{liveStats.totalStrokes}</div>
+            </div>
+            <div className="p-2 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
+              <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>GIR %</div>
+              <div className="font-mono font-bold">{liveStats.girPct}%</div>
+            </div>
+            <div className="p-2 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
+              <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>FIR %</div>
+              <div className="font-mono font-bold">{liveStats.firPct !== null ? `${liveStats.firPct}%` : 'N/A'}</div>
+            </div>
+            <div className="p-2 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
+              <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Putts</div>
+              <div className="font-mono font-bold">{liveStats.totalPutts}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Foursome Crew Pass (4-Seat Manager & Buddy Redemption) */}
       <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-gold)' }}>
         <div className="flex items-center justify-between">
@@ -571,6 +689,7 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
                 <div className="text-xs mt-0.5 truncate" style={{ color: 'var(--text-secondary)' }}>{p.fit}</div>
                 <div className="text-[10px] font-mono mt-0.5" style={{ color: 'var(--accent-emerald)' }}>
                   Gross {p.score} • Net {netScore} (-{playingStrokes} strokes)
+                  {p.id === '1' && liveStats ? ` • GIR ${liveStats.girPct}% • FIR ${liveStats.firPct !== null ? `${liveStats.firPct}%` : 'N/A'} • ${liveStats.totalPutts} putts` : ''}
                 </div>
               </div>
 
@@ -659,10 +778,10 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
           <span className="text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--accent-emerald)' }}>
             <Award size={15} /> Post-Round Recap Card
           </span>
-          <span className="text-[10px] font-mono" style={{ color: 'var(--text-secondary)' }}>GROSS + NET READY</span>
+          <span className="text-[10px] font-mono" style={{ color: 'var(--text-secondary)' }}>GROSS + NET + STATS</span>
         </div>
         <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-          Copy a clean summary of today&apos;s handicaps, gross/net scores, skins, and 19th-hole split to drop straight into your foursome group chat.
+          Copy a clean summary of today&apos;s handicaps, gross/net scores, GIR%, FIR%, putts, skins, and 19th-hole split to drop straight into your foursome group chat.
         </p>
         <button
           type="button"
