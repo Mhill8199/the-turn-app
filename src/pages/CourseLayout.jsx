@@ -827,12 +827,12 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         </div>
       )}
 
-      {/* Aerial Hole Shot Map: Tee Boxes, Hazards, Bunkers, Green & Dispersion */}
+      {/* Google Earth / Satellite Terrain Hole Shot Map */}
       {activeClub && (
         <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
           <div className="flex items-center justify-between text-xs">
             <span className="font-semibold">
-              Aerial Hole #{activeHole.number} - Par {activeHole.par} - {activeHole.yards} yds
+              Satellite Hole #{activeHole.number} - Par {activeHole.par} - {activeHole.yards} yds
             </span>
             <span className="font-mono" style={{ color: 'var(--accent-gold)' }}>
               {activeClub.headwindMph >= 0 ? `${activeClub.headwindMph} mph Into` : `${Math.abs(activeClub.headwindMph)} mph Helping`}
@@ -841,7 +841,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
 
           <div className="flex items-center justify-between text-[11px]">
             <span className="flex items-center gap-1" style={{ color: 'var(--text-secondary)' }}>
-              <Crosshair size={12} /> Tap aerial map to drop pin:
+              <Crosshair size={12} /> Tap map to drop pin:
             </span>
             <div className="flex items-center gap-1.5">
               {PIN_TYPES.map((pt) => (
@@ -868,63 +868,120 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
           <svg
             viewBox="0 0 280 330"
             onClick={handleSvgTap}
-            className="w-full h-72 rounded-xl cursor-crosshair select-none"
-            style={{ backgroundColor: '#13261D' }}
+            className="w-full h-80 rounded-2xl cursor-crosshair select-none border border-emerald-950 shadow-inner"
+            style={{ backgroundColor: '#0A150F' }}
           >
-            {/* First-Cut Rough & Hole Corridor */}
+            <defs>
+              <radialGradient id="earthTerrain" cx="50%" cy="45%" r="65%">
+                <stop offset="0%" stopColor="#162A1E" />
+                <stop offset="65%" stopColor="#0E1C14" />
+                <stop offset="100%" stopColor="#08110C" />
+              </radialGradient>
+              <linearGradient id="roughTurf" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stopColor="#163C29" />
+                <stop offset="50%" stopColor="#1D4D35" />
+                <stop offset="100%" stopColor="#143625" />
+              </linearGradient>
+              <pattern id="mowStripes" width="28" height="22" patternUnits="userSpaceOnUse">
+                <rect width="28" height="11" fill="#236E48" />
+                <rect y="11" width="28" height="11" fill="#2B8055" />
+              </pattern>
+              <radialGradient id="greenCollar" cx="50%" cy="50%" r="55%">
+                <stop offset="0%" stopColor="#3BC279" />
+                <stop offset="72%" stopColor="#2FA364" />
+                <stop offset="100%" stopColor="#1E7546" />
+              </radialGradient>
+              <radialGradient id="bunkerSand" cx="42%" cy="38%" r="65%">
+                <stop offset="0%" stopColor="#F5EAD0" />
+                <stop offset="72%" stopColor="#DFC794" />
+                <stop offset="100%" stopColor="#A6823C" />
+              </radialGradient>
+              <linearGradient id="waterLake" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stopColor="#0369A1" />
+                <stop offset="50%" stopColor="#0284C7" />
+                <stop offset="100%" stopColor="#075985" />
+              </linearGradient>
+              <filter id="turfShadow" x="-10%" y="-10%" width="120%" height="120%">
+                <feDropShadow dx="0" dy="2" stdDeviation="2.5" floodColor="#040A07" floodOpacity="0.65" />
+              </filter>
+            </defs>
+
+            {/* Satellite Terrain Base & Subtle Topographic Contours */}
+            <rect width="280" height="330" fill="url(#earthTerrain)" />
+            <path d="M 10 85 Q 140 60 270 95" fill="none" stroke="#34D399" strokeOpacity="0.06" strokeWidth="1" />
+            <path d="M 10 175 Q 140 150 270 185" fill="none" stroke="#34D399" strokeOpacity="0.06" strokeWidth="1" />
+            <path d="M 10 255 Q 140 235 270 265" fill="none" stroke="#34D399" strokeOpacity="0.06" strokeWidth="1" />
+
+            {/* Perimeter Tree Canopy Clusters (Left & Right Rough Borders) */}
+            {[
+              [44, 74, 15], [32, 112, 18], [48, 152, 14], [30, 198, 17], [46, 242, 15],
+              [236, 68, 16], [248, 118, 19], [232, 164, 15], [246, 212, 17], [234, 256, 14],
+            ].map(([cx, cy, r], idx) => (
+              <g key={idx}>
+                <circle cx={cx + 2} cy={cy + 3} r={r} fill="#040A07" opacity="0.55" />
+                <circle cx={cx} cy={cy} r={r} fill="#112E1F" stroke="#1C4731" strokeWidth="1" />
+                <circle cx={cx - r * 0.25} cy={cy - r * 0.25} r={r * 0.52} fill="#19422D" opacity="0.7" />
+              </g>
+            ))}
+
+            {/* First-Cut Rough Corridor */}
             <path
-              d="M 88 298 C 82 225, 86 135, 114 54 L 166 54 C 188 135, 184 225, 178 298 Z"
-              fill="#1B4D36"
-              stroke="#2C6E4F"
-              strokeWidth="1.5"
+              d="M 86 300 C 78 225, 84 135, 112 52 L 168 52 C 190 135, 186 225, 180 300 Z"
+              fill="url(#roughTurf)"
+              stroke="#2A6B4A"
+              strokeWidth="1.2"
+              filter="url(#turfShadow)"
             />
 
-            {/* Mowed Fairway Landing Corridor */}
+            {/* Mowed Fairway Landing Strip with Alternating Stripes */}
             <path
-              d="M 114 265 C 108 205, 114 135, 132 66 L 154 66 C 166 135, 162 205, 156 265 Z"
-              fill="#277A52"
-              opacity="0.85"
+              d="M 113 266 C 107 205, 113 135, 131 66 L 155 66 C 167 135, 163 205, 157 266 Z"
+              fill="url(#mowStripes)"
+              stroke="#4ADE80"
+              strokeOpacity="0.32"
+              strokeWidth="1"
             />
 
-            {/* Yardage Reference Lines (100y / 200y markers) */}
-            <line x1="78" y1="145" x2="202" y2="145" stroke="#A7F3D0" strokeOpacity="0.14" strokeDasharray="3 3" />
-            <line x1="78" y1="215" x2="202" y2="215" stroke="#A7F3D0" strokeOpacity="0.14" strokeDasharray="3 3" />
+            {/* Satellite Distance Range Rings (100y / 200y from Pin) */}
+            <path d="M 94 140 Q 140 152 186 140" fill="none" stroke="#E2E8F0" strokeOpacity="0.18" strokeDasharray="3 3" />
+            <path d="M 86 212 Q 140 226 194 212" fill="none" stroke="#E2E8F0" strokeOpacity="0.18" strokeDasharray="3 3" />
 
-            {/* Water Hazard (if present on hole) */}
+            {/* Water Hazard with Shimmer Ripples */}
             {activeHole.waterCarry && (() => {
               const waterY = Math.max(76, 282 - (activeHole.waterCarry / activeHole.yards) * 224);
               return (
-                <g>
+                <g filter="url(#turfShadow)">
                   <path
-                    d={`M 86 ${waterY - 6} Q 138 ${waterY - 12} 194 ${waterY - 4} L 192 ${waterY + 8} Q 138 ${waterY + 14} 88 ${waterY + 6} Z`}
-                    fill="#0284C7"
-                    fillOpacity="0.72"
+                    d={`M 84 ${waterY - 7} Q 138 ${waterY - 14} 196 ${waterY - 5} L 194 ${waterY + 9} Q 138 ${waterY + 16} 86 ${waterY + 7} Z`}
+                    fill="url(#waterLake)"
                     stroke="#7DD3FC"
-                    strokeWidth="1"
+                    strokeWidth="1.1"
                   />
-                  <text x="198" y={waterY + 3} fontSize="8" fontWeight="bold" fill="#7DD3FC">
+                  <line x1="108" y1={waterY - 1} x2="132" y2={waterY - 2} stroke="#BAE6FD" strokeOpacity="0.55" strokeWidth="1" />
+                  <line x1="148" y1={waterY + 3} x2="174" y2={waterY + 2} stroke="#BAE6FD" strokeOpacity="0.45" strokeWidth="1" />
+                  <text x="200" y={waterY + 3} fontSize="8" fontWeight="bold" fill="#7DD3FC">
                     H2O {activeHole.waterCarry}y
                   </text>
                 </g>
               );
             })()}
 
-            {/* Fairway & Greenside Sand Bunkers */}
+            {/* Fairway & Greenside 3D Sand Bunkers */}
             {activeHole.bunkerStart && (() => {
               const bY = Math.max(66, 282 - (activeHole.bunkerStart / activeHole.yards) * 224);
               return (
-                <g>
+                <g filter="url(#turfShadow)">
                   <ellipse
                     cx="166"
                     cy={bY}
-                    rx="14"
-                    ry="10"
+                    rx="15"
+                    ry="10.5"
                     transform={`rotate(-14 166 ${bY})`}
-                    fill="#E5D5B0"
-                    stroke="#A17A32"
-                    strokeWidth="1.5"
+                    fill="url(#bunkerSand)"
+                    stroke="#8C6A28"
+                    strokeWidth="1.2"
                   />
-                  <text x="184" y={bY + 3} fontSize="8" fill="#FDE68A">
+                  <text x="185" y={bY + 3} fontSize="8" fontWeight="bold" fill="#FDE68A">
                     Sand {activeHole.bunkerStart}y
                   </text>
                 </g>
@@ -932,21 +989,28 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
             })()}
 
             {/* Greenside Left & Right Bunkers */}
-            <ellipse cx="106" cy="52" rx="11" ry="7" fill="#E5D5B0" stroke="#A17A32" strokeWidth="1.2" />
-            <ellipse cx="174" cy="48" rx="12" ry="8" fill="#E5D5B0" stroke="#A17A32" strokeWidth="1.2" />
+            <g filter="url(#turfShadow)">
+              <ellipse cx="105" cy="52" rx="11.5" ry="7.5" fill="url(#bunkerSand)" stroke="#8C6A28" strokeWidth="1.1" />
+              <ellipse cx="175" cy="48" rx="12.5" ry="8" fill="url(#bunkerSand)" stroke="#8C6A28" strokeWidth="1.1" />
+            </g>
 
-            {/* Putting Green Complex & Flagstick */}
-            <ellipse cx="140" cy="44" rx="34" ry="20" fill="#34A86B" stroke="#6EE7B7" strokeWidth="1.2" />
-            <line x1="142" y1="24" x2="142" y2="44" stroke="#FFFFFF" strokeWidth="1.6" />
-            <polygon points="142,24 156,28 142,32" fill="#EF4444" />
-            <text x="178" y="44" fontSize="9" fontWeight="bold" fill="#FFFFFF">
-              {activeHole.yards}y Pin
+            {/* Contoured Putting Green Fringe & Pin Flagstick */}
+            <g filter="url(#turfShadow)">
+              <ellipse cx="140" cy="44" rx="37" ry="22" fill="#238653" />
+              <ellipse cx="140" cy="44" rx="33" ry="19" fill="url(#greenCollar)" stroke="#A7F3D0" strokeWidth="1.1" />
+              <circle cx="142" cy="44" r="2.2" fill="#0B1611" />
+              <line x1="142" y1="22" x2="142" y2="44" stroke="#FFFFFF" strokeWidth="1.7" />
+              <polygon points="142,22 158,26.5 142,31" fill="#EF4444" />
+            </g>
+            <rect x="178" y="34" width="48" height="14" rx="4" fill="#060D09" fillOpacity="0.78" stroke="#6EE7B7" strokeOpacity="0.4" strokeWidth="0.8" />
+            <text x="202" y="43.5" textAnchor="middle" fontSize="8.5" fontWeight="bold" fill="#FFFFFF">
+              {activeHole.yards}y PIN
             </text>
 
             {/* User-Dropped Miss-Zone Pins */}
             {currentHolePins.map((pin) => (
               <g key={pin.id}>
-                <circle cx={pin.x} cy={pin.y} r="6.5" fill={pin.color} fillOpacity="0.9" stroke="#FFFFFF" strokeWidth="1.4" />
+                <circle cx={pin.x} cy={pin.y} r="6.5" fill={pin.color} fillOpacity="0.92" stroke="#FFFFFF" strokeWidth="1.5" />
                 <text x={pin.x + 8} y={pin.y + 3} fontSize="8" fontWeight="bold" fill={pin.color}>
                   {pin.label}
                 </text>
@@ -967,30 +1031,39 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
                   <polygon
                     points={`140,${teeY} ${landX - 18},${carryY} ${landX + 18},${carryY}`}
                     fill={strokeCol}
-                    fillOpacity="0.16"
+                    fillOpacity="0.2"
                   />
                   <path
                     d={`M 140 ${teeY} Q ${140 - shapeShiftX * 0.6} ${(teeY + carryY) / 2} ${landX} ${carryY}`}
                     fill="none"
                     stroke={strokeCol}
-                    strokeWidth="2.2"
+                    strokeWidth="2.4"
                     strokeDasharray="4 3"
                   />
-                  <line x1={landX} y1={carryY} x2={landX} y2={totalY} stroke={strokeCol} strokeWidth="2.2" />
+                  <line x1={landX} y1={carryY} x2={landX} y2={totalY} stroke={strokeCol} strokeWidth="2.4" />
                   {pairedApproachClub && (
-                    <line x1={landX} y1={totalY} x2="142" y2="44" stroke="#6EE7B7" strokeWidth="1.6" strokeDasharray="3 3" />
+                    <line x1={landX} y1={totalY} x2="142" y2="44" stroke="#6EE7B7" strokeWidth="1.7" strokeDasharray="3 3" />
                   )}
-                  <circle cx={landX} cy={carryY} r="4.5" fill={strokeCol} stroke="#111827" strokeWidth="1" />
-                  <circle cx={landX} cy={totalY} r="3.2" fill="#FFFFFF" stroke={strokeCol} strokeWidth="1.5" />
-                  <text x={Math.min(162, landX + 9)} y={carryY + 3} fontSize="9" fontWeight="bold" fill={strokeCol}>
+                  <circle cx={landX} cy={carryY} r="4.8" fill={strokeCol} stroke="#FFFFFF" strokeWidth="1.2" />
+                  <circle cx={landX} cy={totalY} r="3.4" fill="#FFFFFF" stroke={strokeCol} strokeWidth="1.5" />
+                  <rect
+                    x={Math.min(160, landX + 7)}
+                    y={carryY - 7}
+                    width="74"
+                    height="14"
+                    rx="4"
+                    fill="#060D09"
+                    fillOpacity="0.82"
+                  />
+                  <text x={Math.min(164, landX + 11)} y={carryY + 3} fontSize="8.5" fontWeight="bold" fill={strokeCol}>
                     {activeClub.club_type}: {activeClub.effectiveCarry}y
                   </text>
                 </>
               );
             })()}
 
-            {/* Tee Box Complex (Tips, Blue, White, Forward) */}
-            <rect x="116" y="260" width="48" height="38" rx="6" fill="#2E8B57" stroke="#A7F3D0" strokeWidth="1" opacity="0.9" />
+            {/* Multi-Tier Tee Box Complex */}
+            <rect x="116" y="259" width="48" height="40" rx="6" fill="#1C5E3E" stroke="#A7F3D0" strokeOpacity="0.55" strokeWidth="1" filter="url(#turfShadow)" />
             {TEE_BOXES.map((tb) => {
               const selected = tb.id === teeId;
               return (
@@ -1002,11 +1075,11 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
                     height="6"
                     rx="2"
                     fill={selected ? '#FBBF24' : '#D1FAE5'}
-                    fillOpacity={selected ? 0.95 : 0.45}
+                    fillOpacity={selected ? 0.98 : 0.45}
                   />
                   <text
                     x="162"
-                    y={tb.y + 1}
+                    y={tb.y + 1.5}
                     fontSize="7.5"
                     fontWeight={selected ? 'bold' : 'normal'}
                     fill={selected ? '#FBBF24' : '#D1FAE5'}
@@ -1017,15 +1090,23 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               );
             })}
 
-            {/* Wind Compass & Vector Indicator (Top Left) */}
-            <g transform="translate(36, 36)">
-              <circle cx="0" cy="0" r="18" fill="#0B1611" fillOpacity="0.8" stroke="#6EE7B7" strokeWidth="1" />
+            {/* Satellite Wind Compass & Vector HUD (Top Left) */}
+            <g transform="translate(34, 34)">
+              <circle cx="0" cy="0" r="18" fill="#060D09" fillOpacity="0.84" stroke="#6EE7B7" strokeOpacity="0.6" strokeWidth="1" />
               <g transform={`rotate(${weather.windDirDeg})`}>
-                <line x1="0" y1="10" x2="0" y2="-10" stroke="#FBBF24" strokeWidth="2" />
+                <line x1="0" y1="10" x2="0" y2="-10" stroke="#FBBF24" strokeWidth="2.2" />
                 <polygon points="0,-12 -4,-5 4,-5" fill="#FBBF24" />
               </g>
-              <text x="0" y="28" textAnchor="middle" fontSize="8" fill="#E5E7EB">
-                Wind {degreesToCompass(weather.windDirDeg)}
+              <text x="0" y="28" textAnchor="middle" fontSize="8" fontWeight="bold" fill="#E5E7EB">
+                {degreesToCompass(weather.windDirDeg)} {weather.windSpeedMph}mph
+              </text>
+            </g>
+
+            {/* Satellite Telemetry Badge (Top Right) */}
+            <g transform="translate(206, 12)">
+              <rect x="0" y="0" width="64" height="15" rx="4" fill="#060D09" fillOpacity="0.82" stroke="#34D399" strokeOpacity="0.35" strokeWidth="0.8" />
+              <text x="32" y="10.5" textAnchor="middle" fontSize="7.5" fontFamily="monospace" fill="#6EE7B7">
+                SAT • {activeCourse.elevationFt}ft
               </text>
             </g>
           </svg>
