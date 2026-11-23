@@ -1,7 +1,8 @@
-﻿import { useState } from 'react';
-import { Sun, Moon, Shirt, Compass, Briefcase, Users, Crown, LogIn, LogOut, Watch, Glasses, X, ShieldCheck, Check } from 'lucide-react';
+﻿import { useState, useEffect } from 'react';
+import { Sun, Moon, Shirt, Compass, Briefcase, Users, Crown, LogIn, LogOut, Watch, Glasses, X, ShieldCheck, Check, Loader2 } from 'lucide-react';
 import { useTheme } from './context/ThemeContext';
 import { useAuth } from './context/AuthContext';
+import { supabase } from './lib/supabase';
 import PrepWardrobe from './pages/PrepWardrobe';
 import CourseLayout from './pages/CourseLayout';
 import StockBag, { DEFAULT_CUSTOM_BAG } from './pages/StockBag';
@@ -10,11 +11,14 @@ import AuthModal from './components/AuthModal';
 
 export default function App() {
   const { theme, toggleTheme } = useTheme();
-  const { user, profile, signOut } = useAuth();
+  const { user, profile, signOut, refreshProfile } = useAuth();
   const [activeTab, setActiveTab] = useState('course');
   const [demoPro, setDemoPro] = useState(false);
   const [paywallFeature, setPaywallFeature] = useState(null);
   const [selectedPlan, setSelectedPlan] = useState('solo'); // 'solo' ($119.99/yr) | 'foursome' ($299.99/yr)
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [checkoutError, setCheckoutError] = useState('');
+  const [upgradeBanner, setUpgradeBanner] = useState('');
   const [authOpen, setAuthOpen] = useState(false);
   const [wearableOpen, setWearableOpen] = useState(false);
 
@@ -27,7 +31,53 @@ export default function App() {
     }
   });
 
-  // Dedicated /privacy-policy compliance route for Solis Noir LLC
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('upgrade') === 'success') {
+      setUpgradeBanner('Welcome to Tour Pro! Your membership is active.');
+      refreshProfile?.();
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (params.get('upgrade') === 'cancelled') {
+      setUpgradeBanner('Checkout cancelled — your Clubhouse free access remains active.');
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, [refreshProfile]);
+
+  const handleStartCheckout = async () => {
+    setCheckoutError('');
+
+    if (!user) {
+      setPaywallFeature(null);
+      setAuthOpen(true);
+      return;
+    }
+
+    setCheckoutLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('create-checkout', {
+        body: {
+          plan: selectedPlan,
+          userId: user.id,
+          email: user.email,
+          returnUrl: window.location.origin,
+        },
+      });
+
+      if (error) throw new Error(error.message || 'Unable to start Stripe Checkout');
+      if (data?.url) {
+        window.location.href = data.url;
+      } else {
+        throw new Error('No checkout URL returned from server');
+      }
+    } catch (err) {
+      // Fallback preview mode if Stripe Edge Function secrets are not configured yet
+      setCheckoutError(err.message);
+      setDemoPro(true);
+    } finally {
+      setCheckoutLoading(false);
+    }
+  };
+
   if (window.location.pathname === '/privacy-policy') {
     return (
       <div className="min-h-screen max-w-xl mx-auto px-5 py-10 space-y-5">
@@ -112,17 +162,24 @@ export default function App() {
       </header>
 
       <main className="flex-1 px-4 pt-4">
+        {upgradeBanner && (
+          <div className="mb-3 p-3 rounded-xl border text-xs font-semibold flex items-center justify-between" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-emerald)', color: 'var(--accent-emerald)' }}>
+            <span>{upgradeBanner}</span>
+            <button onClick={() => setUpgradeBanner('')}><X size={14} /></button>
+          </div>
+        )}
+
         {activeTab === 'course' && (
           <CourseLayout
             clubs={clubs}
             isPro={isPro}
-            onOpenPaywall={setPaywallFeature}
+            onOpenPaywall={(feat) => { setCheckoutError(''); setPaywallFeature(feat); }}
             onOpenWearable={() => setWearableOpen(true)}
           />
         )}
         {activeTab === 'bag' && <StockBag clubs={clubs} setClubs={setClubs} />}
         {activeTab === 'foursome' && <FoursomeHub />}
-        {activeTab === 'prep' && <PrepWardrobe isPro={isPro} onOpenPaywall={setPaywallFeature} />}
+        {activeTab === 'prep' && <PrepWardrobe isPro={isPro} onOpenPaywall={(feat) => { setCheckoutError(''); setPaywallFeature(feat); }} />}
 
         <div className="text-center pb-24 pt-2">
           <a href="/privacy-policy" className="text-[11px] inline-flex items-center gap-1 opacity-60 hover:opacity-100">
@@ -133,7 +190,6 @@ export default function App() {
 
       {authOpen && <AuthModal onClose={() => setAuthOpen(false)} />}
 
-      {/* Wearable HUD Simulator Modal */}
       {wearableOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
           <div className="w-full max-w-md rounded-2xl p-5 border space-y-4" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
@@ -167,7 +223,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Tour Pro ($119.99/yr) & Foursome Crew Pass ($299.99/yr) Paywall Sheet */}
       {paywallFeature && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center p-4">
           <div className="w-full max-w-md rounded-2xl p-5 border space-y-4" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
@@ -187,9 +242,7 @@ export default function App() {
               </p>
             </div>
 
-            {/* Plan Selector Cards */}
             <div className="space-y-2.5">
-              {/* Individual Tour Pro Plan */}
               <button
                 type="button"
                 onClick={() => setSelectedPlan('solo')}
@@ -208,7 +261,7 @@ export default function App() {
                     </span>
                   </div>
                   <div className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-                    1 golfer • Unlimited bag, courses & wearables ($14.99/mo billed monthly)
+                    1 golfer • Unlimited bag, courses & wearables
                   </div>
                 </div>
                 <div className="text-right shrink-0 ml-2">
@@ -217,7 +270,6 @@ export default function App() {
                 </div>
               </button>
 
-              {/* 4-Player Foursome Crew Pass */}
               <button
                 type="button"
                 onClick={() => setSelectedPlan('foursome')}
@@ -239,7 +291,7 @@ export default function App() {
                     </span>
                   </div>
                   <div className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-                    4 Tour Pro accounts (~$75/player) + shared crew courses & live bet ledger
+                    4 Tour Pro accounts (~$75/player) + crew hub
                   </div>
                 </div>
                 <div className="text-right shrink-0 ml-2">
@@ -249,18 +301,33 @@ export default function App() {
               </button>
             </div>
 
+            {checkoutError && (
+              <p className="text-[11px] text-amber-500">
+                Stripe sandbox notice ({checkoutError}) — enabled local Pro preview so you can keep testing.
+              </p>
+            )}
+
             <div className="flex gap-2 pt-1">
               <button
-                onClick={() => { setDemoPro(true); setPaywallFeature(null); }}
+                type="button"
+                disabled={checkoutLoading}
+                onClick={handleStartCheckout}
                 className="flex-1 py-3 rounded-xl font-semibold text-sm text-white flex items-center justify-center gap-1.5"
                 style={{ backgroundColor: 'var(--accent-emerald)' }}
               >
-                <Check size={16} />
-                {selectedPlan === 'solo'
-                  ? 'Start 14-Day Trial ($119.99/yr)'
-                  : 'Start Foursome Trial ($299.99/yr)'}
+                {checkoutLoading ? (
+                  <><Loader2 size={16} className="animate-spin" /> Redirecting to Stripe...</>
+                ) : (
+                  <>
+                    <Check size={16} />
+                    {selectedPlan === 'solo'
+                      ? 'Checkout Tour Pro ($119.99/yr)'
+                      : 'Checkout Foursome ($299.99/yr)'}
+                  </>
+                )}
               </button>
               <button
+                type="button"
                 onClick={() => setPaywallFeature(null)}
                 className="px-4 py-3 rounded-xl border text-sm"
                 style={{ borderColor: 'var(--border-subtle)' }}

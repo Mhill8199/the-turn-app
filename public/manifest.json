@@ -1,0 +1,16 @@
+﻿{
+  "name": "The Turn — Golf Caddie & Prep",
+  "short_name": "The Turn",
+  "description": "Live weather, dew-point & wind shot physics, custom stock yardages, course strategy, and pre-round prep.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0E110F",
+  "theme_color": "#175B3F",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
