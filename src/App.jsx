@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect } from 'react';
-import { Sun, Moon, Shirt, Compass, Briefcase, Users, Crown, LogIn, LogOut, Watch, Glasses, X, ShieldCheck, Check, Loader2, KeyRound, Copy } from 'lucide-react';
+import { Sun, Moon, Shirt, Compass, Briefcase, Users, Crown, LogIn, LogOut, Watch, Glasses, X, ShieldCheck, Check, Loader2, KeyRound, Copy, Sliders } from 'lucide-react';
 import { useTheme } from './context/ThemeContext';
 import { useAuth } from './context/AuthContext';
 import { supabase } from './lib/supabase';
@@ -9,6 +9,57 @@ import StockBag, { DEFAULT_CUSTOM_BAG } from './pages/StockBag';
 import FoursomeHub from './pages/FoursomeHub';
 import AuthModal from './components/AuthModal';
 import OnboardingModal from './components/OnboardingModal';
+
+function SmartGlassesHud({ clubs }) {
+  const [targetYards, setTargetYards] = useState(165);
+  const best = [...clubs].sort(
+    (a, b) => Math.abs((a.carry_yards || 150) - targetYards) - Math.abs((b.carry_yards || 150) - targetYards)
+  )[0] || clubs[0];
+
+  return (
+    <div className="min-h-screen bg-black text-emerald-400 p-6 flex flex-col justify-between font-mono">
+      <div className="flex items-center justify-between border-b border-emerald-900 pb-3">
+        <span className="text-sm font-bold tracking-widest uppercase">THE TURN • GLASSES HUD</span>
+        <a href="/" className="text-xs px-3 py-1 rounded-lg border border-emerald-700 text-emerald-300">
+          Exit HUD
+        </a>
+      </div>
+
+      <div className="my-auto space-y-6 text-center py-6">
+        <div className="text-xs uppercase tracking-widest text-emerald-500">Target Distance</div>
+        <div className="flex items-center justify-center gap-4">
+          <button
+            type="button"
+            onClick={() => setTargetYards((y) => Math.max(40, y - 5))}
+            className="w-14 h-14 rounded-2xl border-2 border-emerald-600 text-2xl font-bold"
+          >
+            -5
+          </button>
+          <div className="text-6xl font-extrabold text-white">{targetYards}y</div>
+          <button
+            type="button"
+            onClick={() => setTargetYards((y) => Math.min(320, y + 5))}
+            className="w-14 h-14 rounded-2xl border-2 border-emerald-600 text-2xl font-bold"
+          >
+            +5
+          </button>
+        </div>
+
+        <div className="p-5 rounded-3xl border-2 border-emerald-500 bg-emerald-950/30 space-y-2">
+          <div className="text-xs uppercase tracking-widest text-amber-400">Recommended Club</div>
+          <div className="text-4xl font-black text-white">{best?.club_type}</div>
+          <div className="text-sm text-emerald-300">
+            Stock {best?.carry_yards}y Carry • {best?.total_yards}y Total • {best?.shot_shape || 'Straight'}
+          </div>
+        </div>
+      </div>
+
+      <div className="text-center text-xs text-emerald-600">
+        High-Contrast Lens View • Solis Noir LLC
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   const { theme, toggleTheme } = useTheme();
@@ -139,6 +190,10 @@ export default function App() {
     }
   };
 
+  if (window.location.pathname === '/hud') {
+    return <SmartGlassesHud clubs={clubs} />;
+  }
+
   if (window.location.pathname === '/privacy-policy') {
     return (
       <div className="min-h-screen max-w-xl mx-auto px-5 py-10 space-y-5">
@@ -184,11 +239,20 @@ export default function App() {
 
         <div className="flex items-center gap-1.5">
           <button
+            onClick={() => setOnboardingOpen(true)}
+            className="p-2 rounded-lg border"
+            style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
+            title="Re-Run 3-Step Setup"
+          >
+            <Sliders size={14} />
+          </button>
+
+          <button
             onClick={() => setDemoPro(!demoPro)}
             className="text-[11px] px-2.5 py-1.5 rounded-lg border font-medium"
             style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
           >
-            {isPro ? 'Free View' : 'Pro View'}
+            {isPro ? 'Free' : 'Pro'}
           </button>
 
           <button
@@ -248,8 +312,11 @@ export default function App() {
         )}
         {activeTab === 'prep' && <PrepWardrobe isPro={isPro} onOpenPaywall={(feat) => { setCheckoutError(''); setPaywallFeature(feat); }} />}
 
-        <div className="text-center pb-24 pt-2">
-          <a href="/privacy-policy" className="text-[11px] inline-flex items-center gap-1 opacity-60 hover:opacity-100">
+        <div className="text-center pb-24 pt-2 flex items-center justify-center gap-4">
+          <a href="/hud" className="text-[11px] inline-flex items-center gap-1 opacity-70 hover:opacity-100">
+            <Glasses size={12} /> Glasses /HUD
+          </a>
+          <a href="/privacy-policy" className="text-[11px] inline-flex items-center gap-1 opacity-70 hover:opacity-100">
             <ShieldCheck size={12} /> Solis Noir LLC • Privacy Policy
           </a>
         </div>
@@ -288,7 +355,7 @@ export default function App() {
             <div className="p-4 rounded-2xl border space-y-1.5" style={{ backgroundColor: '#0B0D0C', borderColor: '#2B352F', color: '#F3F4F1' }}>
               <div className="flex items-center justify-between text-[11px] text-amber-400 font-mono">
                 <span className="flex items-center gap-1"><Glasses size={13} /> META RAY-BAN • VOICE & HUD</span>
-                <span>HANDS-FREE</span>
+                <a href="/hud" className="underline">OPEN /HUD</a>
               </div>
               <div className="text-xs italic text-zinc-300">&ldquo;Hey Meta, ask The Turn what club I&apos;m hitting.&rdquo;</div>
               <div className="text-xs text-emerald-400">

@@ -15,8 +15,17 @@ import {
   Search,
   Flag,
   Crosshair,
+  Loader2,
+  SlidersHorizontal,
 } from 'lucide-react';
-import { COURSE_PRESETS, fetchCourseWeather, degreesToCompass, calculateShotPhysics } from '../lib/weatherPhysics';
+import {
+  COURSE_PRESETS,
+  fetchCourseWeather,
+  fetchElevationFt,
+  searchNearbyGolfCourses,
+  degreesToCompass,
+  calculateShotPhysics,
+} from '../lib/weatherPhysics';
 
 const CUSTOM_COURSES_KEY = 'the-turn-custom-courses';
 const SCORES_KEY = 'the-turn-scores';
@@ -34,18 +43,6 @@ const PIN_TYPES = [
   { id: 'bailout', label: 'Bailout', color: '#EAB308' },
   { id: 'dead', label: 'Dead Zone', color: '#EF4444' },
 ];
-
-async function fetchElevationFt(lat, lon) {
-  try {
-    const res = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${lat}&longitude=${lon}`);
-    if (!res.ok) return 500;
-    const data = await res.json();
-    const meters = Array.isArray(data.elevation) ? data.elevation[0] : data.elevation;
-    return typeof meters === 'number' ? Math.round(meters * 3.28084) : 500;
-  } catch {
-    return 500;
-  }
-}
 
 export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall, onOpenWearable }) {
   const [customCourses, setCustomCourses] = useState(() => {
@@ -76,16 +73,21 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   });
 
   const allCourses = [...customCourses, ...COURSE_PRESETS];
-  const [courseId, setCourseId] = useState(() => allCourses[0]?.id || COURSE_PRESETS[0].id);
+  const [courseId, setCourseId] = useState(() => {
+    const savedHome = localStorage.getItem('the-turn-home-course');
+    if (savedHome && allCourses.some((c) => c.id === savedHome)) return savedHome;
+    return allCourses[0]?.id || COURSE_PRESETS[0].id;
+  });
   const [holeIdx, setHoleIdx] = useState(0);
   const [teeId, setTeeId] = useState('blue');
   const [activePinType, setActivePinType] = useState('target');
   const [selectedClubId, setSelectedClubId] = useState(clubs[1]?.id || clubs[0]?.id || '1');
   const [courseSearch, setCourseSearch] = useState('');
+  const [searchingCourses, setSearchingCourses] = useState(false);
   const [gpsStatus, setGpsStatus] = useState('');
   const [gpsLoading, setGpsLoading] = useState(false);
+  const [simOpen, setSimOpen] = useState(false);
 
-  // Custom Course / Hole Creator state
   const [creatorOpen, setCreatorOpen] = useState(false);
   const [creatorMode, setCreatorMode] = useState('hole');
   const [newCourseName, setNewCourseName] = useState('');
@@ -129,7 +131,6 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   const baseHole = activeCourse.holes[holeIdx] || activeCourse.holes[0];
   const activeTee = TEE_BOXES.find((t) => t.id === teeId) || TEE_BOXES[1];
 
-  // Scale hole yardage and hazard distances for selected Tee Box
   const activeHole = {
     ...baseHole,
     yards: Math.round(baseHole.yards * activeTee.mult),
@@ -142,6 +143,12 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
     setHoleNumber((activeCourse.holes?.length || 0) + 1);
   }, [activeCourse]);
 
+  const reloadLiveWeather = () => {
+    fetchCourseWeather(activeCourse.lat, activeCourse.lon)
+      .then((live) => setWeather(live))
+      .catch(() => {});
+  };
+
   useEffect(() => {
     let cancelled = false;
     fetchCourseWeather(activeCourse.lat, activeCourse.lon)
@@ -152,13 +159,39 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
     return () => { cancelled = true; };
   }, [activeCourse.lat, activeCourse.lon]);
 
+  const handleCourseDirectorySearch = async (e) => {
+    e.preventDefault();
+    if (!courseSearch.trim()) return;
+    setSearchingCourses(true);
+    setGpsStatus(`Searching courses near "${courseSearch.trim()}"...`);
+    try {
+      const found = await searchNearbyGolfCourses({ query: courseSearch.trim() });
+      if (found.length > 0) {
+        setCustomCourses((prev) => {
+          const existingIds = new Set(prev.map((c) => c.id));
+          const uniqueNew = found.filter((c) => !existingIds.has(c.id));
+          return [...uniqueNew, ...prev];
+        });
+        setCourseId(found[0].id);
+        setHoleIdx(0);
+        setGpsStatus(`Found ${found.length} courses — loaded ${found[0].name} (${found[0].elevationFt} ft)`);
+      } else {
+        setGpsStatus(`No map courses found for "${courseSearch.trim()}" — tap + to add custom.`);
+      }
+    } catch {
+      setGpsStatus('Course lookup timed out — try again or add custom.');
+    } finally {
+      setSearchingCourses(false);
+    }
+  };
+
   const handleUseGps = async () => {
     if (!navigator.geolocation) {
       setGpsStatus('Geolocation not supported in this browser.');
       return;
     }
     setGpsLoading(true);
-    setGpsStatus('Locating coordinates & live telemetry...');
+    setGpsStatus('Scanning GPS & nearby golf courses...');
 
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
@@ -171,15 +204,23 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
           setWeather(live);
         } catch {}
 
-        const gpsCourseId = 'gps-live-spot';
-        const existingGps = customCourses.find((c) => c.id === gpsCourseId);
-        const defaultHoles = existingGps?.holes?.length
-          ? existingGps.holes
-          : [
-              { number: 1, par: 4, yards: 390, bearingDeg: 140, bunkerStart: 250, bunkerEnd: 272, waterCarry: null, greenSlope: 'Back-to-Front', note: 'Live GPS pin spot — customize hole yardage & hazards anytime.' },
-              { number: 2, par: 3, yards: 168, bearingDeg: 215, bunkerStart: 152, bunkerEnd: 160, waterCarry: null, greenSlope: 'Firm & Fast', note: 'Check live wind & dew point before committing.' },
-            ];
+        try {
+          const nearby = await searchNearbyGolfCourses({ lat, lon });
+          if (nearby.length > 0) {
+            setCustomCourses((prev) => {
+              const existingIds = new Set(prev.map((c) => c.id));
+              const uniqueNew = nearby.filter((c) => !existingIds.has(c.id));
+              return [...uniqueNew, ...prev];
+            });
+            setCourseId(nearby[0].id);
+            setHoleIdx(0);
+            setGpsStatus(`GPS Locked • Found ${nearby.length} nearby courses (${nearby[0].name})`);
+            setGpsLoading(false);
+            return;
+          }
+        } catch {}
 
+        const gpsCourseId = 'gps-live-spot';
         const gpsCourse = {
           id: gpsCourseId,
           name: `GPS Pin (${lat}, ${lon})`,
@@ -187,7 +228,10 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
           lat,
           lon,
           elevationFt: elevFt,
-          holes: defaultHoles,
+          holes: [
+            { number: 1, par: 4, yards: 390, bearingDeg: 140, bunkerStart: 250, bunkerEnd: 272, waterCarry: null, greenSlope: 'Back-to-Front', note: 'Live GPS pin spot — customize hole yardage & hazards anytime.' },
+            { number: 2, par: 3, yards: 168, bearingDeg: 215, bunkerStart: 152, bunkerEnd: 160, waterCarry: null, greenSlope: 'Firm & Fast', note: 'Check live wind & dew point before committing.' },
+          ],
         };
 
         setCustomCourses((prev) => [gpsCourse, ...prev.filter((c) => c.id !== gpsCourseId)]);
@@ -306,14 +350,6 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
     setMissPins((prev) => ({ ...prev, [holePinKey]: [] }));
   };
 
-  const filteredCourses = courseSearch.trim()
-    ? allCourses.filter(
-        (c) =>
-          c.name.toLowerCase().includes(courseSearch.toLowerCase()) ||
-          (c.city && c.city.toLowerCase().includes(courseSearch.toLowerCase()))
-      )
-    : allCourses;
-
   const evaluatedClubs = clubs.map((club) => {
     const physics = calculateShotPhysics({
       stockCarry: club.carry_yards,
@@ -357,6 +393,17 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         )[0]
       : null;
 
+  // Crosswind aim offset calculation (~0.65 yds lateral drift per mph of crosswind at 200y)
+  const crossYards = activeClub
+    ? Math.round((Math.abs(activeClub.crosswindMph) * (activeClub.effectiveCarry / 160)) * 0.65)
+    : 0;
+  const aimAdvice =
+    crossYards >= 2
+      ? activeClub.crosswindMph > 0
+        ? `Aim ${crossYards}y Right (R→L wind)`
+        : `Aim ${crossYards}y Left (L→R wind)`
+      : 'Aim Center (Neutral crosswind)';
+
   const dewSpread = weather.tempF - weather.dewPointF;
   const estStimp = dewSpread <= 4 ? '9.2 (Morning Dew)' : dewSpread <= 10 ? '10.5 (Medium-Fast)' : '11.8 (Dry & Slick)';
   const frontYards = Math.max(40, activeHole.yards - 12);
@@ -382,19 +429,17 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
     .reduce((acc, h) => acc + h.par, 0);
   const relPar = totalStrokes - parForLogged;
 
-  // Shot-shape lateral offset on SVG (Fade shifts right, Draw shifts left)
   const shapeShiftX = activeClub?.shot_shape === 'Fade' ? 14 : activeClub?.shot_shape === 'Draw' ? -14 : 0;
 
   return (
     <div className="space-y-4 pb-24">
-      {/* Course Selector, GPS Lookup, Tee Box & Custom Builder Bar */}
       <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
-        <div className="flex items-center gap-2">
+        <form onSubmit={handleCourseDirectorySearch} className="flex items-center gap-1.5">
           <div className="relative flex-1">
             <Search size={13} className="absolute left-3 top-2.5 opacity-55" />
             <input
               type="text"
-              placeholder="Filter courses or cities..."
+              placeholder="Search city or course (e.g. Corona, CA)..."
               value={courseSearch}
               onChange={(e) => setCourseSearch(e.target.value)}
               className="w-full rounded-xl pl-8 pr-3 py-1.5 text-xs border"
@@ -403,13 +448,22 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
           </div>
 
           <button
+            type="submit"
+            disabled={searchingCourses}
+            className="px-2.5 py-1.5 rounded-xl text-xs font-semibold border shrink-0"
+            style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
+          >
+            {searchingCourses ? <Loader2 size={13} className="animate-spin" /> : 'Find'}
+          </button>
+
+          <button
             type="button"
             onClick={handleUseGps}
             disabled={gpsLoading}
-            className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white flex items-center gap-1 shrink-0"
+            className="px-2.5 py-1.5 rounded-xl text-xs font-semibold text-white flex items-center gap-1 shrink-0"
             style={{ backgroundColor: 'var(--accent-emerald)' }}
           >
-            <Navigation size={13} /> {gpsLoading ? 'GPS...' : 'GPS'}
+            <Navigation size={13} /> {gpsLoading ? '...' : 'GPS'}
           </button>
 
           <button
@@ -418,9 +472,9 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
             className="px-2.5 py-1.5 rounded-xl text-xs font-semibold border flex items-center gap-1 shrink-0"
             style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
           >
-            {creatorOpen ? <X size={13} /> : <Plus size={13} />} {creatorOpen ? 'Close' : 'Custom'}
+            {creatorOpen ? <X size={13} /> : <Plus size={13} />}
           </button>
-        </div>
+        </form>
 
         <div className="flex items-center justify-between gap-2">
           <select
@@ -429,18 +483,22 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
             className="font-bold text-sm rounded-xl px-3 py-2 border flex-1"
             style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
           >
-            {filteredCourses.map((c) => (
+            {allCourses.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name} ({c.elevationFt} ft)
               </option>
             ))}
           </select>
-          <span className="text-[11px] font-mono px-2.5 py-1.5 rounded-xl border" style={{ borderColor: 'var(--border-subtle)', color: 'var(--accent-emerald)' }}>
-            {weather.isLive ? 'LIVE WX' : 'SIM WX'}
-          </span>
+          <button
+            type="button"
+            onClick={() => setSimOpen(!simOpen)}
+            className="text-[11px] font-mono px-2.5 py-1.5 rounded-xl border flex items-center gap-1"
+            style={{ borderColor: 'var(--border-subtle)', color: weather.isLive ? 'var(--accent-emerald)' : 'var(--accent-gold)' }}
+          >
+            <SlidersHorizontal size={11} /> {weather.isLive ? 'LIVE WX' : 'WHAT-IF'}
+          </button>
         </div>
 
-        {/* Tee Box Selector */}
         <div className="flex items-center justify-between gap-1.5">
           <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>Tee Box</span>
           <div className="flex gap-1.5">
@@ -466,7 +524,6 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
           </div>
         )}
 
-        {/* Hole Number Pills */}
         <div className="flex gap-1.5 overflow-x-auto pb-1">
           {activeCourse.holes.map((h, idx) => (
             <button
@@ -483,7 +540,60 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         </div>
       </div>
 
-      {/* Custom Course & Hole Creator */}
+      {/* Weather What-If Simulator Drawer */}
+      {simOpen && (
+        <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-emerald)' }}>
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent-emerald)' }}>
+              Weather & Dew Point What-If Simulator
+            </span>
+            <button
+              type="button"
+              onClick={reloadLiveWeather}
+              className="text-[11px] underline font-semibold"
+              style={{ color: 'var(--accent-gold)' }}
+            >
+              Reset to Live WX
+            </button>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-xs">
+            <div>
+              <label className="text-[10px] block mb-0.5" style={{ color: 'var(--text-secondary)' }}>Temp ({weather.tempF}°F)</label>
+              <input
+                type="range"
+                min="40"
+                max="105"
+                value={weather.tempF}
+                onChange={(e) => setWeather((w) => ({ ...w, tempF: Number(e.target.value), isLive: false }))}
+                className="w-full"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] block mb-0.5" style={{ color: 'var(--text-secondary)' }}>Dew Pt ({weather.dewPointF}°F)</label>
+              <input
+                type="range"
+                min="30"
+                max={weather.tempF}
+                value={Math.min(weather.dewPointF, weather.tempF)}
+                onChange={(e) => setWeather((w) => ({ ...w, dewPointF: Number(e.target.value), isLive: false }))}
+                className="w-full"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] block mb-0.5" style={{ color: 'var(--text-secondary)' }}>Wind ({weather.windSpeedMph} mph)</label>
+              <input
+                type="range"
+                min="0"
+                max="30"
+                value={weather.windSpeedMph}
+                onChange={(e) => setWeather((w) => ({ ...w, windSpeedMph: Number(e.target.value), windGustMph: Number(e.target.value) + 5, isLive: false }))}
+                className="w-full"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       {creatorOpen && (
         <form
           onSubmit={creatorMode === 'hole' ? handleSaveHole : handleCreateCourse}
@@ -714,28 +824,25 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               Pull {bestClub.club_type} ({bestClub.effectiveCarry}y carry / {bestClub.effectiveTotal}y total)
             </div>
             <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-              {activeHole.par === 3
-                ? `Dialed for ${activeHole.yards}y pin • Green: ${activeHole.greenSlope}`
-                : `Leaves ${bestClub.remainingToPin}y approach • ${bestClub.turfCondition}`}
+              {aimAdvice} • {activeHole.par === 3 ? `Green: ${activeHole.greenSlope}` : `Leaves ${bestClub.remainingToPin}y in`}
             </div>
           </div>
           <CheckCircle2 size={20} style={{ color: 'var(--accent-emerald)' }} className="shrink-0" />
         </div>
       )}
 
-      {/* Overhead Course Visualizer with Miss-Zone Pins & Dispersion Curve */}
+      {/* Overhead Course Visualizer */}
       {activeClub && (
         <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
           <div className="flex items-center justify-between text-xs">
             <span className="font-semibold">
-              Hole {activeHole.number} • {activeHole.yards} yds • Shape: {activeClub.shot_shape || 'Straight'}
+              Hole {activeHole.number} • {activeHole.yards} yds • {aimAdvice}
             </span>
             <span className="font-mono" style={{ color: 'var(--accent-gold)' }}>
               {activeClub.headwindMph >= 0 ? `${activeClub.headwindMph} mph Into` : `${Math.abs(activeClub.headwindMph)} mph Helping`}
             </span>
           </div>
 
-          {/* Miss-Zone Pin Toolbar */}
           <div className="flex items-center justify-between text-[11px]">
             <span className="flex items-center gap-1" style={{ color: 'var(--text-secondary)' }}>
               <Crosshair size={12} /> Tap map to drop pin:
@@ -793,7 +900,6 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               );
             })()}
 
-            {/* Custom Miss-Zone Pins */}
             {currentHolePins.map((pin) => (
               <g key={pin.id}>
                 <circle cx={pin.x} cy={pin.y} r="6" fill={pin.color} opacity="0.85" stroke="#FFFFFF" strokeWidth="1.2" />
@@ -803,7 +909,6 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               </g>
             ))}
 
-            {/* Shot-Shape Curved Flight + Dispersion Cone */}
             {(() => {
               const carryY = Math.max(36, 285 - (activeClub.effectiveCarry / activeHole.yards) * 243);
               const totalY = Math.max(32, 285 - (activeClub.effectiveTotal / activeHole.yards) * 243);
@@ -813,13 +918,11 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
 
               return (
                 <>
-                  {/* Dispersion cone from tee to landing zone */}
                   <polygon
                     points={`123,283 ${landX - 18},${carryY} ${landX + 18},${carryY}`}
                     fill={strokeCol}
                     opacity="0.14"
                   />
-                  {/* Curved ball flight path */}
                   <path
                     d={`M 123 283 Q ${123 - shapeShiftX * 0.6} ${(283 + carryY) / 2} ${landX} ${carryY}`}
                     fill="none"

@@ -1,7 +1,8 @@
-﻿import { useState } from 'react';
-import { Sparkles, Sliders, Image, Palette, Lock, RefreshCw, Check, Plus } from 'lucide-react';
+﻿import { useState, useEffect } from 'react';
+import { Sparkles, Sliders, Image, Palette, Lock, RefreshCw, Check, Plus, Luggage } from 'lucide-react';
 import AddClosetModal from '../components/AddClosetModal';
 import { useAuth } from '../context/AuthContext';
+import { supabase } from '../lib/supabase';
 
 const INITIAL_CLOSET = [
   { id: '1', category: 'top', brand: 'TravisMathew', name: 'White Performance Polo', hex: '#F4F4F2', vibe: 'classic', weather: 'warm', lastWornDays: 1, imageUrl: null },
@@ -19,14 +20,57 @@ export default function PrepWardrobe({ isPro = false, onOpenPaywall }) {
   const [closet, setCloset] = useState(INITIAL_CLOSET);
   const [mode, setMode] = useState('easy');
   const [visualMode, setVisualMode] = useState('no-pics');
-  const [weather, setWeather] = useState('warm');
-  const [vibe, setVibe] = useState('classic');
+  const [weather, setWeather] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('the-turn-fit-prefs') || '{}').weather || 'warm';
+    } catch {
+      return 'warm';
+    }
+  });
+  const [vibe, setVibe] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('the-turn-fit-prefs') || '{}').vibe || 'classic';
+    } catch {
+      return 'classic';
+    }
+  });
   const [lockedIn, setLockedIn] = useState(false);
   const [addModalOpen, setAddModalOpen] = useState(false);
 
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase
+      .from('wardrobe_items')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .then(({ data }) => {
+        if (data && data.length > 0) {
+          setCloset(
+            data.map((row) => {
+              const daysAgo = row.last_worn_at
+                ? Math.floor((Date.now() - new Date(row.last_worn_at).getTime()) / (1000 * 60 * 60 * 24))
+                : 99;
+              return {
+                id: row.id,
+                category: row.category,
+                brand: row.brand || 'Custom',
+                name: row.name,
+                hex: row.primary_color_hex,
+                vibe: row.vibe_tag || 'classic',
+                weather: row.weather_tag || 'all',
+                lastWornDays: daysAgo,
+                imageUrl: row.image_url,
+              };
+            })
+          );
+        }
+      });
+  }, [user?.id]);
+
   const handleModeSwitch = (targetMode) => {
     if (targetMode === 'hard' && !isPro) {
-      onOpenPaywall('Hard Mode ("Tour Stylist") & Trip Packer');
+      onOpenPaywall('Hard Mode ("Tour Stylist") & 3-Day Trip Packer');
       return;
     }
     setMode(targetMode);
@@ -34,7 +78,7 @@ export default function PrepWardrobe({ isPro = false, onOpenPaywall }) {
 
   const handleVisualSwitch = (targetVisual) => {
     if (targetVisual === 'pics' && !isPro) {
-      onOpenPaywall('Pictures Mode (AI Background Removal)');
+      onOpenPaywall('Pictures Mode (AI Flat-Lay Closet)');
       return;
     }
     setVisualMode(targetVisual);
@@ -48,26 +92,40 @@ export default function PrepWardrobe({ isPro = false, onOpenPaywall }) {
 
   const activeOutfit = [pickedTop, pickedBottom, pickedShoes, pickedHat].filter(Boolean);
 
+  const handleLockOutfit = async () => {
+    setLockedIn(true);
+    const summary = activeOutfit.slice(0, 3).map((i) => i.name).join(' • ');
+    if (summary) {
+      localStorage.setItem('the-turn-locked-fit', summary);
+    }
+    if (user?.id && activeOutfit.length > 0) {
+      const today = new Date().toISOString().split('T')[0];
+      const ids = activeOutfit.map((i) => i.id);
+      await supabase.from('wardrobe_items').update({ last_worn_at: today }).in('id', ids);
+    }
+  };
+
+  const tripTops = closet.filter((i) => i.category === 'top').slice(0, 3);
+  const tripBottoms = closet.filter((i) => i.category === 'bottom').slice(0, 2);
+  const tripShoes = closet.filter((i) => i.category === 'shoes').slice(0, 2);
+
   return (
     <div className="space-y-4 pb-24">
       <div className="rounded-2xl p-4 border" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
         <div className="flex items-center justify-between text-xs uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
-          <span>Next Tee Time • Sat 7:00 AM</span>
+          <span>Pre-Round Prep • Sat 7:00 AM</span>
           <span className="font-mono font-semibold" style={{ color: 'var(--accent-emerald)' }}>56°F → 74°F</span>
         </div>
         <div className="flex items-center justify-between mt-1">
-          <h2 className="text-lg font-semibold">Morning Fit & Layering Brief</h2>
+          <h2 className="text-lg font-semibold">Wardrobe & Layering</h2>
           <button
             onClick={() => setAddModalOpen(true)}
             className="text-xs px-2.5 py-1.5 rounded-lg border font-medium flex items-center gap-1"
             style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
           >
-            <Plus size={13} /> Add Gear
+            <Plus size={13} /> Add Piece
           </button>
         </div>
-        <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-          Crisp start warming by Hole 8. Lightweight quarter-zip recommended on the front nine.
-        </p>
       </div>
 
       <div className="grid grid-cols-2 gap-2.5">
@@ -151,7 +209,7 @@ export default function PrepWardrobe({ isPro = false, onOpenPaywall }) {
       <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-base">Recommended Lineup</h3>
-          <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>3-day wear cooldown active</span>
+          <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Syncs to Foursome</span>
         </div>
 
         <div className="space-y-2.5">
@@ -186,11 +244,11 @@ export default function PrepWardrobe({ isPro = false, onOpenPaywall }) {
 
         <div className="flex gap-2 pt-2">
           <button
-            onClick={() => setLockedIn(true)}
+            onClick={handleLockOutfit}
             className="flex-1 py-3 rounded-xl font-semibold text-sm text-white flex items-center justify-center gap-2 transition"
             style={{ backgroundColor: 'var(--accent-emerald)' }}
           >
-            {lockedIn ? <><Check size={16} /> Fit Locked for Saturday</> : 'Lock In This Fit'}
+            {lockedIn ? <><Check size={16} /> Fit Locked & Synced to Crew</> : 'Lock In This Fit'}
           </button>
           <button
             onClick={() => setLockedIn(false)}
@@ -202,6 +260,31 @@ export default function PrepWardrobe({ isPro = false, onOpenPaywall }) {
           </button>
         </div>
       </div>
+
+      {mode === 'hard' && isPro && (
+        <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-gold)' }}>
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent-gold)' }}>
+            <Luggage size={15} /> Tour Stylist • 3-Day Golf Trip Capsule
+          </div>
+          <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+            3 Tops × 2 Bottoms × 2 Pairs of Shoes = 6 non-repeating course combinations in one carry-on.
+          </p>
+          <div className="grid grid-cols-3 gap-2 text-xs">
+            <div className="p-2.5 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
+              <div className="font-semibold mb-1">3 Polos</div>
+              {tripTops.map((t) => <div key={t.id} className="truncate text-[11px]" style={{ color: 'var(--text-secondary)' }}>• {t.name}</div>)}
+            </div>
+            <div className="p-2.5 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
+              <div className="font-semibold mb-1">2 Bottoms</div>
+              {tripBottoms.map((b) => <div key={b.id} className="truncate text-[11px]" style={{ color: 'var(--text-secondary)' }}>• {b.name}</div>)}
+            </div>
+            <div className="p-2.5 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
+              <div className="font-semibold mb-1">2 Shoes</div>
+              {tripShoes.map((s) => <div key={s.id} className="truncate text-[11px]" style={{ color: 'var(--text-secondary)' }}>• {s.name}</div>)}
+            </div>
+          </div>
+        </div>
+      )}
 
       {addModalOpen && (
         <AddClosetModal
