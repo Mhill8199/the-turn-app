@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Wind,
   Droplets,
@@ -32,10 +32,10 @@ const SCORES_KEY = 'the-turn-scores';
 const PINS_KEY = 'the-turn-miss-pins';
 
 const TEE_BOXES = [
-  { id: 'tips', label: 'Tips', mult: 1.06 },
-  { id: 'blue', label: 'Blue', mult: 1.0 },
-  { id: 'white', label: 'White', mult: 0.93 },
-  { id: 'forward', label: 'Forward', mult: 0.84 },
+  { id: 'tips', label: 'Tips', mult: 1.06, y: 294 },
+  { id: 'blue', label: 'Blue', mult: 1.0, y: 284 },
+  { id: 'white', label: 'White', mult: 0.93, y: 274 },
+  { id: 'forward', label: 'Forward', mult: 0.84, y: 264 },
 ];
 
 const PIN_TYPES = [
@@ -174,12 +174,12 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         });
         setCourseId(found[0].id);
         setHoleIdx(0);
-        setGpsStatus(`Found ${found.length} courses — loaded ${found[0].name} (${found[0].elevationFt} ft)`);
+        setGpsStatus(`Found ${found.length} courses - loaded ${found[0].name} (${found[0].elevationFt} ft)`);
       } else {
-        setGpsStatus(`No map courses found for "${courseSearch.trim()}" — tap + to add custom.`);
+        setGpsStatus(`No map courses found for "${courseSearch.trim()}" - tap + to add custom.`);
       }
     } catch {
-      setGpsStatus('Course lookup timed out — try again or add custom.');
+      setGpsStatus('Course lookup timed out - try again or add custom.');
     } finally {
       setSearchingCourses(false);
     }
@@ -214,7 +214,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
             });
             setCourseId(nearby[0].id);
             setHoleIdx(0);
-            setGpsStatus(`GPS Locked • Found ${nearby.length} nearby courses (${nearby[0].name})`);
+            setGpsStatus(`GPS Locked - Found ${nearby.length} nearby courses (${nearby[0].name})`);
             setGpsLoading(false);
             return;
           }
@@ -229,7 +229,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
           lon,
           elevationFt: elevFt,
           holes: [
-            { number: 1, par: 4, yards: 390, bearingDeg: 140, bunkerStart: 250, bunkerEnd: 272, waterCarry: null, greenSlope: 'Back-to-Front', note: 'Live GPS pin spot — customize hole yardage & hazards anytime.' },
+            { number: 1, par: 4, yards: 390, bearingDeg: 140, bunkerStart: 250, bunkerEnd: 272, waterCarry: null, greenSlope: 'Back-to-Front', note: 'Live GPS pin spot - customize hole yardage & hazards anytime.' },
             { number: 2, par: 3, yards: 168, bearingDeg: 215, bunkerStart: 152, bunkerEnd: 160, waterCarry: null, greenSlope: 'Firm & Fast', note: 'Check live wind & dew point before committing.' },
           ],
         };
@@ -237,7 +237,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         setCustomCourses((prev) => [gpsCourse, ...prev.filter((c) => c.id !== gpsCourseId)]);
         setCourseId(gpsCourseId);
         setHoleIdx(0);
-        setGpsStatus(`Locked GPS (${lat}, ${lon}) • Elev ${elevFt} ft`);
+        setGpsStatus(`Locked GPS (${lat}, ${lon}) - Elev ${elevFt} ft`);
         setGpsLoading(false);
       },
       (err) => {
@@ -263,7 +263,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
       bunkerEnd: bunkerNum ? bunkerNum + 22 : null,
       waterCarry: waterNum,
       greenSlope,
-      note: holeNote.trim() || 'Custom hole strategy — watch hazards and wind.',
+      note: holeNote.trim() || 'Custom hole strategy - watch hazards and wind.',
     };
 
     const isPreset = COURSE_PRESETS.some((c) => c.id === activeCourse.id);
@@ -313,7 +313,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
           bunkerEnd: bunkerNum ? bunkerNum + 22 : null,
           waterCarry: waterNum,
           greenSlope,
-          note: holeNote.trim() || 'Opening hole — play smart off the tee.',
+          note: holeNote.trim() || 'Opening hole - play smart off the tee.',
         },
       ],
     };
@@ -336,8 +336,8 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
       return;
     }
     const rect = e.currentTarget.getBoundingClientRect();
-    const x = Math.round(((e.clientX - rect.left) / rect.width) * 260);
-    const y = Math.round(((e.clientY - rect.top) / rect.height) * 310);
+    const x = Math.round(((e.clientX - rect.left) / rect.width) * 280);
+    const y = Math.round(((e.clientY - rect.top) / rect.height) * 330);
     const pinSpec = PIN_TYPES.find((p) => p.id === activePinType) || PIN_TYPES[0];
 
     setMissPins((prev) => ({
@@ -393,15 +393,14 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         )[0]
       : null;
 
-  // Crosswind aim offset calculation (~0.65 yds lateral drift per mph of crosswind at 200y)
   const crossYards = activeClub
     ? Math.round((Math.abs(activeClub.crosswindMph) * (activeClub.effectiveCarry / 160)) * 0.65)
     : 0;
   const aimAdvice =
     crossYards >= 2
       ? activeClub.crosswindMph > 0
-        ? `Aim ${crossYards}y Right (R→L wind)`
-        : `Aim ${crossYards}y Left (L→R wind)`
+        ? `Aim ${crossYards}y Right (R->L wind)`
+        : `Aim ${crossYards}y Left (L->R wind)`
       : 'Aim Center (Neutral crosswind)';
 
   const dewSpread = weather.tempF - weather.dewPointF;
@@ -534,13 +533,12 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               }`}
               style={holeIdx !== idx ? { borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' } : {}}
             >
-              #{h.number} • P{h.par} ({Math.round(h.yards * activeTee.mult)}y)
+              #{h.number} - P{h.par} ({Math.round(h.yards * activeTee.mult)}y)
             </button>
           ))}
         </div>
       </div>
 
-      {/* Weather What-If Simulator Drawer */}
       {simOpen && (
         <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-emerald)' }}>
           <div className="flex items-center justify-between">
@@ -558,7 +556,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
           </div>
           <div className="grid grid-cols-3 gap-2 text-xs">
             <div>
-              <label className="text-[10px] block mb-0.5" style={{ color: 'var(--text-secondary)' }}>Temp ({weather.tempF}°F)</label>
+              <label className="text-[10px] block mb-0.5" style={{ color: 'var(--text-secondary)' }}>Temp ({weather.tempF}F)</label>
               <input
                 type="range"
                 min="40"
@@ -569,7 +567,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               />
             </div>
             <div>
-              <label className="text-[10px] block mb-0.5" style={{ color: 'var(--text-secondary)' }}>Dew Pt ({weather.dewPointF}°F)</label>
+              <label className="text-[10px] block mb-0.5" style={{ color: 'var(--text-secondary)' }}>Dew Pt ({weather.dewPointF}F)</label>
               <input
                 type="range"
                 min="30"
@@ -717,7 +715,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
 
           <div className="grid grid-cols-3 gap-2">
             <div>
-              <label className="text-[10px] block mb-0.5" style={{ color: 'var(--text-secondary)' }}>Bearing (0–359°)</label>
+              <label className="text-[10px] block mb-0.5" style={{ color: 'var(--text-secondary)' }}>Bearing (0-359 deg)</label>
               <input
                 type="number"
                 value={holeBearing}
@@ -782,17 +780,16 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         </form>
       )}
 
-      {/* Live Atmospheric Telemetry Strip */}
       <div className="grid grid-cols-4 gap-2">
         <div className="rounded-xl p-2.5 border text-center" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
           <Thermometer size={14} className="mx-auto mb-1" style={{ color: 'var(--accent-emerald)' }} />
-          <div className="font-mono font-bold text-sm">{weather.tempF}°F</div>
+          <div className="font-mono font-bold text-sm">{weather.tempF}F</div>
           <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Temp</div>
         </div>
 
         <div className="rounded-xl p-2.5 border text-center" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
           <Droplets size={14} className="mx-auto mb-1 text-sky-400" />
-          <div className="font-mono font-bold text-sm">{weather.dewPointF}°F</div>
+          <div className="font-mono font-bold text-sm">{weather.dewPointF}F</div>
           <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Dew Pt</div>
         </div>
 
@@ -804,12 +801,11 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
 
         <div className="rounded-xl p-2.5 border text-center" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
           <Mountain size={14} className="mx-auto mb-1 opacity-75" />
-          <div className="font-mono font-bold text-sm">{activeCourse.elevationFt}′</div>
+          <div className="font-mono font-bold text-sm">{activeCourse.elevationFt} ft</div>
           <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Elev</div>
         </div>
       </div>
 
-      {/* Best-Chance Caddie Recommendation Banner */}
       {bestClub && (
         <div
           onClick={() => setSelectedClubId(bestClub.id)}
@@ -824,19 +820,19 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               Pull {bestClub.club_type} ({bestClub.effectiveCarry}y carry / {bestClub.effectiveTotal}y total)
             </div>
             <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-              {aimAdvice} • {activeHole.par === 3 ? `Green: ${activeHole.greenSlope}` : `Leaves ${bestClub.remainingToPin}y in`}
+              {aimAdvice} - {activeHole.par === 3 ? `Green: ${activeHole.greenSlope}` : `Leaves ${bestClub.remainingToPin}y in`}
             </div>
           </div>
           <CheckCircle2 size={20} style={{ color: 'var(--accent-emerald)' }} className="shrink-0" />
         </div>
       )}
 
-      {/* Overhead Course Visualizer */}
+      {/* Aerial Hole Shot Map: Tee Boxes, Hazards, Bunkers, Green & Dispersion */}
       {activeClub && (
         <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
           <div className="flex items-center justify-between text-xs">
             <span className="font-semibold">
-              Hole {activeHole.number} • {activeHole.yards} yds • {aimAdvice}
+              Aerial Hole #{activeHole.number} - Par {activeHole.par} - {activeHole.yards} yds
             </span>
             <span className="font-mono" style={{ color: 'var(--accent-gold)' }}>
               {activeClub.headwindMph >= 0 ? `${activeClub.headwindMph} mph Into` : `${Math.abs(activeClub.headwindMph)} mph Helping`}
@@ -845,7 +841,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
 
           <div className="flex items-center justify-between text-[11px]">
             <span className="flex items-center gap-1" style={{ color: 'var(--text-secondary)' }}>
-              <Crosshair size={12} /> Tap map to drop pin:
+              <Crosshair size={12} /> Tap aerial map to drop pin:
             </span>
             <div className="flex items-center gap-1.5">
               {PIN_TYPES.map((pt) => (
@@ -870,86 +866,174 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
           </div>
 
           <svg
-            viewBox="0 0 260 310"
+            viewBox="0 0 280 330"
             onClick={handleSvgTap}
-            className="w-full h-64 rounded-xl cursor-crosshair"
-            style={{ backgroundColor: 'var(--bg-elevated)' }}
+            className="w-full h-72 rounded-xl cursor-crosshair select-none"
+            style={{ backgroundColor: '#13261D' }}
           >
-            <path d="M92,285 Q82,165 112,42 L156,42 Q178,165 148,285 Z" fill="#1E6B4B" opacity="0.35" />
-            <ellipse cx="134" cy="40" rx="28" ry="18" fill="#23865D" />
-            <circle cx="136" cy="37" r="3" fill="#FFFFFF" />
-            <text x="166" y="42" fontSize="9" fill="currentColor" opacity="0.8">{activeHole.yards}y Pin</text>
+            {/* First-Cut Rough & Hole Corridor */}
+            <path
+              d="M 88 298 C 82 225, 86 135, 114 54 L 166 54 C 188 135, 184 225, 178 298 Z"
+              fill="#1B4D36"
+              stroke="#2C6E4F"
+              strokeWidth="1.5"
+            />
 
+            {/* Mowed Fairway Landing Corridor */}
+            <path
+              d="M 114 265 C 108 205, 114 135, 132 66 L 154 66 C 166 135, 162 205, 156 265 Z"
+              fill="#277A52"
+              opacity="0.85"
+            />
+
+            {/* Yardage Reference Lines (100y / 200y markers) */}
+            <line x1="78" y1="145" x2="202" y2="145" stroke="#A7F3D0" strokeOpacity="0.14" strokeDasharray="3 3" />
+            <line x1="78" y1="215" x2="202" y2="215" stroke="#A7F3D0" strokeOpacity="0.14" strokeDasharray="3 3" />
+
+            {/* Water Hazard (if present on hole) */}
             {activeHole.waterCarry && (() => {
-              const waterY = Math.max(65, 285 - (activeHole.waterCarry / activeHole.yards) * 243);
+              const waterY = Math.max(76, 282 - (activeHole.waterCarry / activeHole.yards) * 224);
               return (
-                <>
-                  <rect x="75" y={waterY - 6} width="115" height="12" rx="4" fill="#38BDF8" opacity="0.65" />
-                  <text x="194" y={waterY + 3} fontSize="8" fill="#38BDF8">Water {activeHole.waterCarry}y</text>
-                </>
+                <g>
+                  <path
+                    d={`M 86 ${waterY - 6} Q 138 ${waterY - 12} 194 ${waterY - 4} L 192 ${waterY + 8} Q 138 ${waterY + 14} 88 ${waterY + 6} Z`}
+                    fill="#0284C7"
+                    fillOpacity="0.72"
+                    stroke="#7DD3FC"
+                    strokeWidth="1"
+                  />
+                  <text x="198" y={waterY + 3} fontSize="8" fontWeight="bold" fill="#7DD3FC">
+                    H2O {activeHole.waterCarry}y
+                  </text>
+                </g>
               );
             })()}
 
+            {/* Fairway & Greenside Sand Bunkers */}
             {activeHole.bunkerStart && (() => {
-              const bY = Math.max(60, 285 - (activeHole.bunkerStart / activeHole.yards) * 243);
+              const bY = Math.max(66, 282 - (activeHole.bunkerStart / activeHole.yards) * 224);
               return (
-                <>
-                  <ellipse cx="156" cy={bY} rx="13" ry="16" fill="#D6CFC2" stroke="#9E7B34" strokeWidth="1.5" />
-                  <text x="173" y={bY + 3} fontSize="8" fill="currentColor" opacity="0.75">Bunker {activeHole.bunkerStart}y</text>
-                </>
+                <g>
+                  <ellipse
+                    cx="166"
+                    cy={bY}
+                    rx="14"
+                    ry="10"
+                    transform={`rotate(-14 166 ${bY})`}
+                    fill="#E5D5B0"
+                    stroke="#A17A32"
+                    strokeWidth="1.5"
+                  />
+                  <text x="184" y={bY + 3} fontSize="8" fill="#FDE68A">
+                    Sand {activeHole.bunkerStart}y
+                  </text>
+                </g>
               );
             })()}
 
+            {/* Greenside Left & Right Bunkers */}
+            <ellipse cx="106" cy="52" rx="11" ry="7" fill="#E5D5B0" stroke="#A17A32" strokeWidth="1.2" />
+            <ellipse cx="174" cy="48" rx="12" ry="8" fill="#E5D5B0" stroke="#A17A32" strokeWidth="1.2" />
+
+            {/* Putting Green Complex & Flagstick */}
+            <ellipse cx="140" cy="44" rx="34" ry="20" fill="#34A86B" stroke="#6EE7B7" strokeWidth="1.2" />
+            <line x1="142" y1="24" x2="142" y2="44" stroke="#FFFFFF" strokeWidth="1.6" />
+            <polygon points="142,24 156,28 142,32" fill="#EF4444" />
+            <text x="178" y="44" fontSize="9" fontWeight="bold" fill="#FFFFFF">
+              {activeHole.yards}y Pin
+            </text>
+
+            {/* User-Dropped Miss-Zone Pins */}
             {currentHolePins.map((pin) => (
               <g key={pin.id}>
-                <circle cx={pin.x} cy={pin.y} r="6" fill={pin.color} opacity="0.85" stroke="#FFFFFF" strokeWidth="1.2" />
+                <circle cx={pin.x} cy={pin.y} r="6.5" fill={pin.color} fillOpacity="0.9" stroke="#FFFFFF" strokeWidth="1.4" />
                 <text x={pin.x + 8} y={pin.y + 3} fontSize="8" fontWeight="bold" fill={pin.color}>
                   {pin.label}
                 </text>
               </g>
             ))}
 
+            {/* Shot Arc, Dispersion Cone & Carry/Rollout Markers */}
             {(() => {
-              const carryY = Math.max(36, 285 - (activeClub.effectiveCarry / activeHole.yards) * 243);
-              const totalY = Math.max(32, 285 - (activeClub.effectiveTotal / activeHole.yards) * 243);
-              const landX = 130 + shapeShiftX;
+              const teeY = activeTee.y;
+              const carryY = Math.max(38, teeY - (activeClub.effectiveCarry / activeHole.yards) * (teeY - 44));
+              const totalY = Math.max(34, teeY - (activeClub.effectiveTotal / activeHole.yards) * (teeY - 44));
+              const landX = 140 + shapeShiftX;
               const danger = activeClub.hitsBunker || !activeClub.missesWater;
-              const strokeCol = danger ? '#EF4444' : '#C8A96A';
+              const strokeCol = danger ? '#F87171' : '#FBBF24';
 
               return (
                 <>
                   <polygon
-                    points={`123,283 ${landX - 18},${carryY} ${landX + 18},${carryY}`}
+                    points={`140,${teeY} ${landX - 18},${carryY} ${landX + 18},${carryY}`}
                     fill={strokeCol}
-                    opacity="0.14"
+                    fillOpacity="0.16"
                   />
                   <path
-                    d={`M 123 283 Q ${123 - shapeShiftX * 0.6} ${(283 + carryY) / 2} ${landX} ${carryY}`}
+                    d={`M 140 ${teeY} Q ${140 - shapeShiftX * 0.6} ${(teeY + carryY) / 2} ${landX} ${carryY}`}
                     fill="none"
                     stroke={strokeCol}
-                    strokeWidth="2"
+                    strokeWidth="2.2"
                     strokeDasharray="4 3"
                   />
-                  <line x1={landX} y1={carryY} x2={landX} y2={totalY} stroke={strokeCol} strokeWidth="2" />
+                  <line x1={landX} y1={carryY} x2={landX} y2={totalY} stroke={strokeCol} strokeWidth="2.2" />
                   {pairedApproachClub && (
-                    <line x1={landX} y1={totalY} x2="136" y2="39" stroke="#23865D" strokeWidth="1.5" strokeDasharray="3 3" />
+                    <line x1={landX} y1={totalY} x2="142" y2="44" stroke="#6EE7B7" strokeWidth="1.6" strokeDasharray="3 3" />
                   )}
-                  <circle cx={landX} cy={carryY} r="4.5" fill={strokeCol} />
-                  <circle cx={landX} cy={totalY} r="3" fill="#FFFFFF" stroke={strokeCol} strokeWidth="1.5" />
-                  <text x={Math.min(148, landX + 8)} y={carryY + 3} fontSize="9" fontWeight="bold" fill={strokeCol}>
+                  <circle cx={landX} cy={carryY} r="4.5" fill={strokeCol} stroke="#111827" strokeWidth="1" />
+                  <circle cx={landX} cy={totalY} r="3.2" fill="#FFFFFF" stroke={strokeCol} strokeWidth="1.5" />
+                  <text x={Math.min(162, landX + 9)} y={carryY + 3} fontSize="9" fontWeight="bold" fill={strokeCol}>
                     {activeClub.club_type}: {activeClub.effectiveCarry}y
                   </text>
                 </>
               );
             })()}
 
-            <rect x="110" y="283" width="26" height="10" rx="3" fill="#97A39C" />
+            {/* Tee Box Complex (Tips, Blue, White, Forward) */}
+            <rect x="116" y="260" width="48" height="38" rx="6" fill="#2E8B57" stroke="#A7F3D0" strokeWidth="1" opacity="0.9" />
+            {TEE_BOXES.map((tb) => {
+              const selected = tb.id === teeId;
+              return (
+                <g key={tb.id}>
+                  <rect
+                    x="124"
+                    y={tb.y - 3}
+                    width="32"
+                    height="6"
+                    rx="2"
+                    fill={selected ? '#FBBF24' : '#D1FAE5'}
+                    fillOpacity={selected ? 0.95 : 0.45}
+                  />
+                  <text
+                    x="162"
+                    y={tb.y + 1}
+                    fontSize="7.5"
+                    fontWeight={selected ? 'bold' : 'normal'}
+                    fill={selected ? '#FBBF24' : '#D1FAE5'}
+                  >
+                    {tb.label}
+                  </text>
+                </g>
+              );
+            })}
+
+            {/* Wind Compass & Vector Indicator (Top Left) */}
+            <g transform="translate(36, 36)">
+              <circle cx="0" cy="0" r="18" fill="#0B1611" fillOpacity="0.8" stroke="#6EE7B7" strokeWidth="1" />
+              <g transform={`rotate(${weather.windDirDeg})`}>
+                <line x1="0" y1="10" x2="0" y2="-10" stroke="#FBBF24" strokeWidth="2" />
+                <polygon points="0,-12 -4,-5 4,-5" fill="#FBBF24" />
+              </g>
+              <text x="0" y="28" textAnchor="middle" fontSize="8" fill="#E5E7EB">
+                Wind {degreesToCompass(weather.windDirDeg)}
+              </text>
+            </g>
           </svg>
 
           {pairedApproachClub && (
             <div className="p-2.5 rounded-xl border text-xs flex items-center justify-between" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
               <span>
-                <strong>2-Shot Combo:</strong> {activeClub.club_type} ({activeClub.effectiveTotal}y) → <strong>{pairedApproachClub.club_type}</strong> ({activeClub.remainingToPin}y in)
+                <strong>2-Shot Combo:</strong> {activeClub.club_type} ({activeClub.effectiveTotal}y) -&gt; <strong>{pairedApproachClub.club_type}</strong> ({activeClub.remainingToPin}y in)
               </span>
               <span className="font-mono text-[11px]" style={{ color: 'var(--accent-emerald)' }}>
                 {pairedApproachClub.effectiveCarry}y carry
@@ -974,7 +1058,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
                 style={activeClub.id !== club.id ? { borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' } : {}}
               >
                 <div>{club.club_type}</div>
-                <div className="text-[10px] font-mono opacity-80">Stock {club.carry_yards}y → {club.effectiveCarry}y</div>
+                <div className="text-[10px] font-mono opacity-80">Stock {club.carry_yards}y -&gt; {club.effectiveCarry}y</div>
               </button>
             ))}
           </div>
@@ -991,7 +1075,6 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         </div>
       )}
 
-      {/* Green Complex & Dew-Point Stimp Estimator */}
       <div className="rounded-2xl p-4 border space-y-2.5" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--accent-emerald)' }}>
@@ -1016,7 +1099,6 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         </div>
       </div>
 
-      {/* Live Hole Scorecard & Ghost Pacer */}
       <div className="rounded-2xl p-4 border flex items-center justify-between" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
         <div>
           <div className="text-xs font-semibold">Hole {activeHole.number} Score (Par {activeHole.par})</div>
@@ -1048,7 +1130,6 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         </div>
       </div>
 
-      {/* Wearable Sync Status Button */}
       <button
         type="button"
         onClick={onOpenWearable}
