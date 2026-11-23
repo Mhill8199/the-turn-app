@@ -17,6 +17,7 @@ import {
   Crosshair,
   Loader2,
   SlidersHorizontal,
+  Globe,
 } from 'lucide-react';
 import {
   COURSE_PRESETS,
@@ -43,6 +44,41 @@ const PIN_TYPES = [
   { id: 'bailout', label: 'Bailout', color: '#EAB308' },
   { id: 'dead', label: 'Dead Zone', color: '#EF4444' },
 ];
+
+function buildSatelliteTileGrid(lat, lon, zoom = 16) {
+  const safeLat = Math.max(-85, Math.min(85, Number(lat) || 33.8139));
+  const safeLon = Number(lon) || -117.5156;
+  const n = Math.pow(2, zoom);
+  const exactX = ((safeLon + 180) / 360) * n;
+  const latRad = (safeLat * Math.PI) / 180;
+  const exactY = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n;
+
+  const centerTileX = Math.floor(exactX);
+  const centerTileY = Math.floor(exactY);
+  const fracX = exactX - centerTileX;
+  const fracY = exactY - centerTileY;
+
+  const tileSize = 180;
+  const offsetX = 140 - fracX * tileSize;
+  const offsetY = 165 - fracY * tileSize;
+
+  const tiles = [];
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      const tx = ((centerTileX + dx) % n + n) % n;
+      const ty = centerTileY + dy;
+      if (ty < 0 || ty >= n) continue;
+      tiles.push({
+        key: `${zoom}-${tx}-${ty}`,
+        href: `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${ty}/${tx}`,
+        x: offsetX + dx * tileSize,
+        y: offsetY + dy * tileSize,
+        size: tileSize,
+      });
+    }
+  }
+  return tiles;
+}
 
 export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall, onOpenWearable }) {
   const [customCourses, setCustomCourses] = useState(() => {
@@ -87,6 +123,8 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   const [gpsStatus, setGpsStatus] = useState('');
   const [gpsLoading, setGpsLoading] = useState(false);
   const [simOpen, setSimOpen] = useState(false);
+  const [useSatTiles, setUseSatTiles] = useState(true);
+  const [tileError, setTileError] = useState(false);
 
   const [creatorOpen, setCreatorOpen] = useState(false);
   const [creatorMode, setCreatorMode] = useState('hole');
@@ -130,6 +168,10 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   const activeCourse = allCourses.find((c) => c.id === courseId) || allCourses[0] || COURSE_PRESETS[0];
   const baseHole = activeCourse.holes[holeIdx] || activeCourse.holes[0];
   const activeTee = TEE_BOXES.find((t) => t.id === teeId) || TEE_BOXES[1];
+
+  useEffect(() => {
+    setTileError(false);
+  }, [activeCourse.lat, activeCourse.lon, useSatTiles]);
 
   const activeHole = {
     ...baseHole,
@@ -429,6 +471,8 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   const relPar = totalStrokes - parForLogged;
 
   const shapeShiftX = activeClub?.shot_shape === 'Fade' ? 14 : activeClub?.shot_shape === 'Draw' ? -14 : 0;
+  const satTiles = buildSatelliteTileGrid(activeCourse.lat, activeCourse.lon, 16);
+  const showRealSat = useSatTiles && !tileError;
 
   return (
     <div className="space-y-4 pb-24">
@@ -827,16 +871,30 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         </div>
       )}
 
-      {/* Google Earth / Satellite Terrain Hole Shot Map */}
+      {/* Toggleable Live Satellite Tile + Aerial Hole Shot Map */}
       {activeClub && (
         <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
-          <div className="flex items-center justify-between text-xs">
-            <span className="font-semibold">
-              Satellite Hole #{activeHole.number} - Par {activeHole.par} - {activeHole.yards} yds
+          <div className="flex items-center justify-between gap-2 text-xs">
+            <span className="font-semibold truncate">
+              Hole #{activeHole.number} - Par {activeHole.par} - {activeHole.yards} yds
             </span>
-            <span className="font-mono" style={{ color: 'var(--accent-gold)' }}>
-              {activeClub.headwindMph >= 0 ? `${activeClub.headwindMph} mph Into` : `${Math.abs(activeClub.headwindMph)} mph Helping`}
-            </span>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setUseSatTiles(!useSatTiles)}
+                className="px-2 py-0.5 rounded-lg border font-mono text-[10px] font-semibold flex items-center gap-1"
+                style={{
+                  borderColor: showRealSat ? 'var(--accent-emerald)' : 'var(--border-subtle)',
+                  color: showRealSat ? 'var(--accent-emerald)' : 'var(--text-secondary)',
+                  backgroundColor: 'var(--bg-elevated)',
+                }}
+              >
+                <Globe size={11} /> {showRealSat ? 'SAT TILES' : 'VECTOR'}
+              </button>
+              <span className="font-mono" style={{ color: 'var(--accent-gold)' }}>
+                {activeClub.headwindMph >= 0 ? `${activeClub.headwindMph} mph Into` : `${Math.abs(activeClub.headwindMph)} mph Helping`}
+              </span>
+            </div>
           </div>
 
           <div className="flex items-center justify-between text-[11px]">
@@ -872,6 +930,9 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
             style={{ backgroundColor: '#0A150F' }}
           >
             <defs>
+              <clipPath id="satMapClip">
+                <rect x="0" y="0" width="280" height="330" rx="14" />
+              </clipPath>
               <radialGradient id="earthTerrain" cx="50%" cy="45%" r="65%">
                 <stop offset="0%" stopColor="#162A1E" />
                 <stop offset="65%" stopColor="#0E1C14" />
@@ -906,45 +967,65 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               </filter>
             </defs>
 
-            {/* Satellite Terrain Base & Subtle Topographic Contours */}
+            {/* Fallback Vector Terrain */}
             <rect width="280" height="330" fill="url(#earthTerrain)" />
-            <path d="M 10 85 Q 140 60 270 95" fill="none" stroke="#34D399" strokeOpacity="0.06" strokeWidth="1" />
-            <path d="M 10 175 Q 140 150 270 185" fill="none" stroke="#34D399" strokeOpacity="0.06" strokeWidth="1" />
-            <path d="M 10 255 Q 140 235 270 265" fill="none" stroke="#34D399" strokeOpacity="0.06" strokeWidth="1" />
 
-            {/* Perimeter Tree Canopy Clusters (Left & Right Rough Borders) */}
-            {[
-              [44, 74, 15], [32, 112, 18], [48, 152, 14], [30, 198, 17], [46, 242, 15],
-              [236, 68, 16], [248, 118, 19], [232, 164, 15], [246, 212, 17], [234, 256, 14],
-            ].map(([cx, cy, r], idx) => (
-              <g key={idx}>
-                <circle cx={cx + 2} cy={cy + 3} r={r} fill="#040A07" opacity="0.55" />
-                <circle cx={cx} cy={cy} r={r} fill="#112E1F" stroke="#1C4731" strokeWidth="1" />
-                <circle cx={cx - r * 0.25} cy={cy - r * 0.25} r={r * 0.52} fill="#19422D" opacity="0.7" />
+            {/* Real-World GPS-Centered Satellite Tiles Layer */}
+            {showRealSat && (
+              <g clipPath="url(#satMapClip)">
+                {satTiles.map((t) => (
+                  <image
+                    key={t.key}
+                    href={t.href}
+                    x={t.x}
+                    y={t.y}
+                    width={t.size}
+                    height={t.size}
+                    preserveAspectRatio="xMidYMid slice"
+                    onError={() => setTileError(true)}
+                  />
+                ))}
+                <rect width="280" height="330" fill="#06120B" fillOpacity="0.34" />
               </g>
-            ))}
+            )}
 
-            {/* First-Cut Rough Corridor */}
-            <path
-              d="M 86 300 C 78 225, 84 135, 112 52 L 168 52 C 190 135, 186 225, 180 300 Z"
-              fill="url(#roughTurf)"
-              stroke="#2A6B4A"
-              strokeWidth="1.2"
-              filter="url(#turfShadow)"
-            />
+            {/* Vector Course Terrain Overlay (Full in Vector mode, Subtle Corridor in Satellite mode) */}
+            <g opacity={showRealSat ? 0.42 : 1}>
+              <path d="M 10 85 Q 140 60 270 95" fill="none" stroke="#34D399" strokeOpacity="0.08" strokeWidth="1" />
+              <path d="M 10 175 Q 140 150 270 185" fill="none" stroke="#34D399" strokeOpacity="0.08" strokeWidth="1" />
+              <path d="M 10 255 Q 140 235 270 265" fill="none" stroke="#34D399" strokeOpacity="0.08" strokeWidth="1" />
 
-            {/* Mowed Fairway Landing Strip with Alternating Stripes */}
-            <path
-              d="M 113 266 C 107 205, 113 135, 131 66 L 155 66 C 167 135, 163 205, 157 266 Z"
-              fill="url(#mowStripes)"
-              stroke="#4ADE80"
-              strokeOpacity="0.32"
-              strokeWidth="1"
-            />
+              {!showRealSat && [
+                [44, 74, 15], [32, 112, 18], [48, 152, 14], [30, 198, 17], [46, 242, 15],
+                [236, 68, 16], [248, 118, 19], [232, 164, 15], [246, 212, 17], [234, 256, 14],
+              ].map(([cx, cy, r], idx) => (
+                <g key={idx}>
+                  <circle cx={cx + 2} cy={cy + 3} r={r} fill="#040A07" opacity="0.55" />
+                  <circle cx={cx} cy={cy} r={r} fill="#112E1F" stroke="#1C4731" strokeWidth="1" />
+                  <circle cx={cx - r * 0.25} cy={cy - r * 0.25} r={r * 0.52} fill="#19422D" opacity="0.7" />
+                </g>
+              ))}
+
+              <path
+                d="M 86 300 C 78 225, 84 135, 112 52 L 168 52 C 190 135, 186 225, 180 300 Z"
+                fill="url(#roughTurf)"
+                stroke="#2A6B4A"
+                strokeWidth="1.2"
+                filter="url(#turfShadow)"
+              />
+
+              <path
+                d="M 113 266 C 107 205, 113 135, 131 66 L 155 66 C 167 135, 163 205, 157 266 Z"
+                fill="url(#mowStripes)"
+                stroke="#4ADE80"
+                strokeOpacity="0.35"
+                strokeWidth="1"
+              />
+            </g>
 
             {/* Satellite Distance Range Rings (100y / 200y from Pin) */}
-            <path d="M 94 140 Q 140 152 186 140" fill="none" stroke="#E2E8F0" strokeOpacity="0.18" strokeDasharray="3 3" />
-            <path d="M 86 212 Q 140 226 194 212" fill="none" stroke="#E2E8F0" strokeOpacity="0.18" strokeDasharray="3 3" />
+            <path d="M 94 140 Q 140 152 186 140" fill="none" stroke="#E2E8F0" strokeOpacity="0.22" strokeDasharray="3 3" />
+            <path d="M 86 212 Q 140 226 194 212" fill="none" stroke="#E2E8F0" strokeOpacity="0.22" strokeDasharray="3 3" />
 
             {/* Water Hazard with Shimmer Ripples */}
             {activeHole.waterCarry && (() => {
@@ -988,7 +1069,6 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               );
             })()}
 
-            {/* Greenside Left & Right Bunkers */}
             <g filter="url(#turfShadow)">
               <ellipse cx="105" cy="52" rx="11.5" ry="7.5" fill="url(#bunkerSand)" stroke="#8C6A28" strokeWidth="1.1" />
               <ellipse cx="175" cy="48" rx="12.5" ry="8" fill="url(#bunkerSand)" stroke="#8C6A28" strokeWidth="1.1" />
@@ -996,13 +1076,13 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
 
             {/* Contoured Putting Green Fringe & Pin Flagstick */}
             <g filter="url(#turfShadow)">
-              <ellipse cx="140" cy="44" rx="37" ry="22" fill="#238653" />
-              <ellipse cx="140" cy="44" rx="33" ry="19" fill="url(#greenCollar)" stroke="#A7F3D0" strokeWidth="1.1" />
+              <ellipse cx="140" cy="44" rx="37" ry="22" fill="#238653" fillOpacity={showRealSat ? 0.72 : 1} />
+              <ellipse cx="140" cy="44" rx="33" ry="19" fill="url(#greenCollar)" fillOpacity={showRealSat ? 0.78 : 1} stroke="#A7F3D0" strokeWidth="1.1" />
               <circle cx="142" cy="44" r="2.2" fill="#0B1611" />
               <line x1="142" y1="22" x2="142" y2="44" stroke="#FFFFFF" strokeWidth="1.7" />
               <polygon points="142,22 158,26.5 142,31" fill="#EF4444" />
             </g>
-            <rect x="178" y="34" width="48" height="14" rx="4" fill="#060D09" fillOpacity="0.78" stroke="#6EE7B7" strokeOpacity="0.4" strokeWidth="0.8" />
+            <rect x="178" y="34" width="48" height="14" rx="4" fill="#060D09" fillOpacity="0.82" stroke="#6EE7B7" strokeOpacity="0.4" strokeWidth="0.8" />
             <text x="202" y="43.5" textAnchor="middle" fontSize="8.5" fontWeight="bold" fill="#FFFFFF">
               {activeHole.yards}y PIN
             </text>
@@ -1031,7 +1111,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
                   <polygon
                     points={`140,${teeY} ${landX - 18},${carryY} ${landX + 18},${carryY}`}
                     fill={strokeCol}
-                    fillOpacity="0.2"
+                    fillOpacity="0.22"
                   />
                   <path
                     d={`M 140 ${teeY} Q ${140 - shapeShiftX * 0.6} ${(teeY + carryY) / 2} ${landX} ${carryY}`}
@@ -1053,7 +1133,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
                     height="14"
                     rx="4"
                     fill="#060D09"
-                    fillOpacity="0.82"
+                    fillOpacity="0.85"
                   />
                   <text x={Math.min(164, landX + 11)} y={carryY + 3} fontSize="8.5" fontWeight="bold" fill={strokeCol}>
                     {activeClub.club_type}: {activeClub.effectiveCarry}y
@@ -1063,7 +1143,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
             })()}
 
             {/* Multi-Tier Tee Box Complex */}
-            <rect x="116" y="259" width="48" height="40" rx="6" fill="#1C5E3E" stroke="#A7F3D0" strokeOpacity="0.55" strokeWidth="1" filter="url(#turfShadow)" />
+            <rect x="116" y="259" width="48" height="40" rx="6" fill="#1C5E3E" fillOpacity={showRealSat ? 0.78 : 1} stroke="#A7F3D0" strokeOpacity="0.65" strokeWidth="1" filter="url(#turfShadow)" />
             {TEE_BOXES.map((tb) => {
               const selected = tb.id === teeId;
               return (
@@ -1075,14 +1155,14 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
                     height="6"
                     rx="2"
                     fill={selected ? '#FBBF24' : '#D1FAE5'}
-                    fillOpacity={selected ? 0.98 : 0.45}
+                    fillOpacity={selected ? 0.98 : 0.5}
                   />
                   <text
                     x="162"
                     y={tb.y + 1.5}
                     fontSize="7.5"
                     fontWeight={selected ? 'bold' : 'normal'}
-                    fill={selected ? '#FBBF24' : '#D1FAE5'}
+                    fill={selected ? '#FBBF24' : '#FFFFFF'}
                   >
                     {tb.label}
                   </text>
@@ -1092,21 +1172,21 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
 
             {/* Satellite Wind Compass & Vector HUD (Top Left) */}
             <g transform="translate(34, 34)">
-              <circle cx="0" cy="0" r="18" fill="#060D09" fillOpacity="0.84" stroke="#6EE7B7" strokeOpacity="0.6" strokeWidth="1" />
+              <circle cx="0" cy="0" r="18" fill="#060D09" fillOpacity="0.86" stroke="#6EE7B7" strokeOpacity="0.65" strokeWidth="1" />
               <g transform={`rotate(${weather.windDirDeg})`}>
                 <line x1="0" y1="10" x2="0" y2="-10" stroke="#FBBF24" strokeWidth="2.2" />
                 <polygon points="0,-12 -4,-5 4,-5" fill="#FBBF24" />
               </g>
-              <text x="0" y="28" textAnchor="middle" fontSize="8" fontWeight="bold" fill="#E5E7EB">
+              <text x="0" y="28" textAnchor="middle" fontSize="8" fontWeight="bold" fill="#FFFFFF">
                 {degreesToCompass(weather.windDirDeg)} {weather.windSpeedMph}mph
               </text>
             </g>
 
             {/* Satellite Telemetry Badge (Top Right) */}
-            <g transform="translate(206, 12)">
-              <rect x="0" y="0" width="64" height="15" rx="4" fill="#060D09" fillOpacity="0.82" stroke="#34D399" strokeOpacity="0.35" strokeWidth="0.8" />
-              <text x="32" y="10.5" textAnchor="middle" fontSize="7.5" fontFamily="monospace" fill="#6EE7B7">
-                SAT • {activeCourse.elevationFt}ft
+            <g transform="translate(194, 12)">
+              <rect x="0" y="0" width="76" height="15" rx="4" fill="#060D09" fillOpacity="0.85" stroke="#34D399" strokeOpacity="0.4" strokeWidth="0.8" />
+              <text x="38" y="10.5" textAnchor="middle" fontSize="7.5" fontFamily="monospace" fill="#6EE7B7">
+                {showRealSat ? 'SAT' : 'VEC'} • {activeCourse.elevationFt}ft
               </text>
             </g>
           </svg>
