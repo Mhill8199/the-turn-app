@@ -1,4 +1,4 @@
-﻿export const COURSE_PRESETS = [
+export const COURSE_PRESETS = [
   {
     id: 'dos-lagos',
     name: 'Dos Lagos Golf Club',
@@ -8,7 +8,7 @@
     elevationFt: 740,
     holes: [
       { number: 1, par: 4, yards: 388, bearingDeg: 145, bunkerStart: 245, bunkerEnd: 268, waterCarry: null, greenSlope: 'Back-to-Front', note: 'Favor left-center; right bunker gathers anything leaking right.' },
-      { number: 2, par: 5, yards: 518, bearingDeg: 210, bunkerStart: 275, bunkerEnd: 295, waterCarry: 185, greenSlope: 'Two-Tier Back', note: 'Lay up to 95–105 yds short of the creek unless tailwind is 10+ mph.' },
+      { number: 2, par: 5, yards: 518, bearingDeg: 210, bunkerStart: 275, bunkerEnd: 295, waterCarry: 185, greenSlope: 'Two-Tier Back', note: 'Lay up to 95-105 yds short of the creek unless tailwind is 10+ mph.' },
       { number: 3, par: 3, yards: 164, bearingDeg: 310, bunkerStart: 148, bunkerEnd: 156, waterCarry: null, greenSlope: 'Slopes Left', note: 'Plays half a club longer into the afternoon canyon breeze.' },
       { number: 4, par: 4, yards: 392, bearingDeg: 95, bunkerStart: 252, bunkerEnd: 278, waterCarry: null, greenSlope: 'Firm & Fast', note: '3-Wood or hybrid off the tee takes the 252y right bunker out of play.' },
       { number: 5, par: 4, yards: 424, bearingDeg: 180, bunkerStart: 260, bunkerEnd: 285, waterCarry: null, greenSlope: 'Elevated Front', note: 'Take one extra club to reach the upper shelf.' },
@@ -35,11 +35,91 @@
     lon: -117.4925,
     elevationFt: 1180,
     holes: [
-      { number: 1, par: 4, yards: 368, bearingDeg: 160, bunkerStart: 240, bunkerEnd: 260, waterCarry: null, greenSlope: 'Gentle Tilt', note: 'Position drive at 235–245y for a flat wedge angle.' },
+      { number: 1, par: 4, yards: 368, bearingDeg: 160, bunkerStart: 240, bunkerEnd: 260, waterCarry: null, greenSlope: 'Gentle Tilt', note: 'Position drive at 235-245y for a flat wedge angle.' },
       { number: 2, par: 3, yards: 152, bearingDeg: 240, bunkerStart: 138, bunkerEnd: 146, waterCarry: null, greenSlope: 'Front Bunker', note: 'Do not miss short right.' },
     ],
   },
+  {
+    id: 'yucaipa-valley',
+    name: 'Yucaipa Valley Golf Club',
+    city: 'Yucaipa, CA',
+    lat: 34.0175,
+    lon: -117.0431,
+    elevationFt: 2480,
+    holes: [
+      { number: 1, par: 4, yards: 382, bearingDeg: 195, bunkerStart: 235, bunkerEnd: 255, waterCarry: null, greenSlope: 'Back-to-Front', note: '2,480 ft elevation gives ~3.5% extra carry off the first tee.' },
+      { number: 2, par: 3, yards: 158, bearingDeg: 120, bunkerStart: 142, bunkerEnd: 150, waterCarry: null, greenSlope: 'Slopes Left', note: 'Stay below the pin on the back-left shelf.' },
+    ],
+  },
 ];
+
+export async function fetchElevationFt(lat, lon) {
+  try {
+    const res = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${lat}&longitude=${lon}`);
+    if (!res.ok) return 800;
+    const data = await res.json();
+    const meters = Array.isArray(data.elevation) ? data.elevation[0] : data.elevation;
+    return typeof meters === 'number' ? Math.round(meters * 3.28084) : 800;
+  } catch {
+    return 800;
+  }
+}
+
+export async function searchNearbyGolfCourses({ lat, lon, query }) {
+  let centerLat = lat;
+  let centerLon = lon;
+
+  if (query && query.trim()) {
+    const geoRes = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query.trim())}&limit=1`
+    );
+    const geoData = await geoRes.json();
+    if (Array.isArray(geoData) && geoData.length > 0) {
+      centerLat = parseFloat(geoData[0].lat);
+      centerLon = parseFloat(geoData[0].lon);
+    }
+  }
+
+  if (typeof centerLat !== 'number' || Number.isNaN(centerLat) || typeof centerLon !== 'number' || Number.isNaN(centerLon)) {
+    return [];
+  }
+
+  const overpassQuery = `[out:json][timeout:12];(way["leisure"="golf_course"](around:25000,${centerLat},${centerLon});relation["leisure"="golf_course"](around:25000,${centerLat},${centerLon}););out center 12;`;
+  const res = await fetch('https://overpass-api.de/api/interpreter', {
+    method: 'POST',
+    body: overpassQuery,
+  });
+  if (!res.ok) return [];
+  const data = await res.json();
+
+  const seen = new Set();
+  const courses = [];
+
+  for (const el of data.elements || []) {
+    const name = el.tags?.name;
+    const cLat = el.center?.lat ?? el.lat;
+    const cLon = el.center?.lon ?? el.lon;
+    if (!name || !cLat || !cLon || seen.has(name)) continue;
+    seen.add(name);
+
+    const elevFt = await fetchElevationFt(cLat, cLon);
+    courses.push({
+      id: `osm-${el.id}`,
+      name,
+      city: el.tags?.['addr:city'] || 'Nearby Course',
+      lat: Number(cLat.toFixed(4)),
+      lon: Number(cLon.toFixed(4)),
+      elevationFt: elevFt,
+      holes: [
+        { number: 1, par: 4, yards: 392, bearingDeg: 145, bunkerStart: 245, bunkerEnd: 268, waterCarry: null, greenSlope: 'Back-to-Front', note: 'Live weather, dew point & wind active - customize hole specs with +.' },
+        { number: 2, par: 3, yards: 165, bearingDeg: 220, bunkerStart: 148, bunkerEnd: 156, waterCarry: null, greenSlope: 'Firm & Fast', note: 'Check wind vector and dew point rollout before pulling a club.' },
+      ],
+    });
+    if (courses.length >= 8) break;
+  }
+
+  return courses;
+}
 
 export async function fetchCourseWeather(lat, lon) {
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,dew_point_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m&temperature_unit=fahrenheit&wind_speed_unit=mph`;
@@ -63,31 +143,20 @@ export function degreesToCompass(deg) {
   return dirs[Math.round(deg / 45) % 8];
 }
 
-/**
- * Computes effective carry & rollout given stock yardages, wind vector relative to hole bearing,
- * temperature air-density delta, dew-point turf moisture, and course elevation.
- */
 export function calculateShotPhysics({ stockCarry, stockTotal, windSpeedMph, windDirDeg, holeBearingDeg, tempF, dewPointF, elevationFt }) {
-  // Angle difference between wind source direction and hole direction
-  // If windDirDeg == holeBearingDeg, wind blows straight into player's face (headwind)
   const relRad = ((windDirDeg - holeBearingDeg) * Math.PI) / 180;
-  const headwindComponent = Math.cos(relRad) * windSpeedMph; // + = headwind, - = tailwind
-  const crosswindComponent = Math.sin(relRad) * windSpeedMph; // + = right-to-left, - = left-to-right
+  const headwindComponent = Math.cos(relRad) * windSpeedMph;
+  const crosswindComponent = Math.sin(relRad) * windSpeedMph;
 
-  // Wind factor: headwinds hurt ~1% per mph; tailwinds help ~0.55% per mph
   const windFactor = headwindComponent >= 0
     ? 1 - headwindComponent * 0.01
     : 1 + Math.abs(headwindComponent) * 0.0055;
 
-  // Temperature factor: ~1.5% per 20°F away from 70°F
   const tempFactor = 1 + ((tempF - 70) / 20) * 0.015;
-
-  // Elevation factor: ~1.5% gain per 1,000 ft above sea level
   const elevationFactor = 1 + (elevationFt / 1000) * 0.015;
 
   const effectiveCarry = Math.round(stockCarry * windFactor * tempFactor * elevationFactor);
 
-  // Dew point spread determines turf firmness & morning dew rollout
   const dewSpread = tempF - dewPointF;
   const baseRollout = Math.max(0, (stockTotal || stockCarry) - stockCarry);
   const turfMultiplier = dewSpread <= 4 ? 0.55 : dewSpread <= 10 ? 0.85 : 1.15;
