@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Send, Share2, Check, Shirt, Trophy, Receipt, Award, Cloud, UserPlus, Crown, Ticket } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
@@ -6,10 +6,11 @@ import { useAuth } from '../context/AuthContext';
 export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAuth }) {
   const { user, refreshProfile } = useAuth();
   const initialInviteId = new URLSearchParams(window.location.search).get('invite');
+  const initialLockedFit = localStorage.getItem('the-turn-locked-fit') || 'Navy Polo - Stone Shorts - FJ White';
 
   const [roundId, setRoundId] = useState(initialInviteId);
   const [course, setCourse] = useState('Dos Lagos Golf Club');
-  const [teeTime, setTeeTime] = useState('Saturday • 7:00 AM');
+  const [teeTime, setTeeTime] = useState('Saturday - 7:00 AM');
   const [sideGame, setSideGame] = useState('$5 Nassau (Auto-Press)');
   const [skinValue, setSkinValue] = useState(5);
   const [clubhouseTab, setClubhouseTab] = useState(84);
@@ -18,23 +19,22 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
   const [recapCopied, setRecapCopied] = useState(false);
   const [syncStatus, setSyncStatus] = useState(initialInviteId ? 'Live Invite Link Active' : 'Local Foursome');
 
-  // Crew Pass state
   const [crewPass, setCrewPass] = useState(null);
   const [crewSeats, setCrewSeats] = useState([]);
   const [redeemCodeInput, setRedeemCodeInput] = useState('');
   const [redeemMsg, setRedeemMsg] = useState('');
 
   const [joinName, setJoinName] = useState('');
-  const [joinFit, setJoinFit] = useState('Blue Polo • Dark Pants • Grey Shoes');
+  const [joinFit, setJoinFit] = useState('Blue Polo - Dark Pants - Grey Shoes');
+  const [joinHcp, setJoinHcp] = useState(12);
 
   const [players, setPlayers] = useState([
-    { id: '1', name: 'You', status: 'IN', fit: 'Navy Polo • Stone Shorts • FJ White', tee: 'Blue', skins: 2, score: 78 },
-    { id: '2', name: 'Jason', status: 'IN', fit: 'Grey Polo • Black Pants • Jordan Low', tee: 'Blue', skins: 1, score: 81 },
-    { id: '3', name: 'Rylie', status: 'IN', fit: 'White Polo • Navy Shorts', tee: 'Blue', skins: 2, score: 79 },
-    { id: '4', name: 'Ryan', status: 'MAYBE', fit: 'Pending fit lock', tee: 'Blue', skins: 0, score: 84 },
+    { id: '1', name: 'You', status: 'IN', fit: initialLockedFit, tee: 'Blue', hcp: 10, skins: 2, score: 78 },
+    { id: '2', name: 'Jason', status: 'IN', fit: 'Grey Polo - Black Pants - Jordan Low', tee: 'Blue', hcp: 14, skins: 1, score: 81 },
+    { id: '3', name: 'Rylie', status: 'IN', fit: 'White Polo - Navy Shorts', tee: 'Blue', hcp: 8, skins: 2, score: 79 },
+    { id: '4', name: 'Ryan', status: 'MAYBE', fit: 'Pending fit lock', tee: 'Blue', hcp: 18, skins: 0, score: 84 },
   ]);
 
-  // Load user's Foursome Crew Pass & claimed seats if signed in
   const loadCrewPass = async () => {
     if (!user?.id) return;
     const { data: passes } = await supabase
@@ -60,7 +60,6 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
     loadCrewPass();
   }, [user?.id]);
 
-  // Provision a demo/local Crew Pass if testing Pro mode without Stripe webhook yet
   const handleCreateDemoPass = async () => {
     if (!user?.id) {
       onRequireAuth?.();
@@ -132,6 +131,7 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
             status: r.status || 'MAYBE',
             fit: r.outfit_summary || 'Pending fit lock',
             tee: r.tee_box || 'Blue',
+            hcp: Number(r.handicap) || 12,
             skins: r.skins || 0,
             score: r.score || 80,
           }))
@@ -187,12 +187,13 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
     const { data: insertedPlayers } = await supabase.from('round_players').insert(rows).select();
     if (insertedPlayers) {
       setPlayers(
-        insertedPlayers.map((r) => ({
+        insertedPlayers.map((r, idx) => ({
           id: r.id,
           name: r.player_name,
           status: r.status,
           fit: r.outfit_summary,
           tee: r.tee_box,
+          hcp: players[idx]?.hcp ?? 12,
           skins: r.skins,
           score: r.score,
         }))
@@ -258,6 +259,11 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
     }
   };
 
+  const updatePlayerHcp = (id, hcpVal) => {
+    const cleanHcp = Math.max(0, Math.min(54, Number(hcpVal) || 0));
+    setPlayers((prev) => prev.map((p) => (p.id === id ? { ...p, hcp: cleanHcp } : p)));
+  };
+
   const handleBuddyJoin = async (e) => {
     e.preventDefault();
     if (!joinName.trim()) return;
@@ -267,6 +273,7 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
       status: 'IN',
       fit: joinFit.trim() || 'Fit locked',
       tee: 'Blue',
+      hcp: Math.max(0, Math.min(54, Number(joinHcp) || 12)),
       skins: 0,
       score: 80,
     };
@@ -296,17 +303,21 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
   const activeCount = Math.max(1, activePlayers.length);
   const totalSkins = activePlayers.reduce((sum, p) => sum + p.skins, 0);
   const perPlayerTab = Math.round((Number(clubhouseTab) || 0) / activeCount);
+  const lowHcp = activePlayers.reduce((min, p) => Math.min(min, Number(p.hcp) || 0), Infinity);
+  const baselineHcp = Number.isFinite(lowHcp) ? lowHcp : 0;
 
   const shareRecapCard = () => {
     const lines = activePlayers
       .map((p) => {
+        const playingStrokes = Math.max(0, (Number(p.hcp) || 0) - baselineHcp);
+        const netScore = p.score - playingStrokes;
         const skinNet = p.skins * skinValue * (activeCount - 1) - (totalSkins - p.skins) * skinValue;
         const finalNet = skinNet - perPlayerTab;
-        return `${p.name}: ${p.score} (${p.skins} skins | Net ${finalNet >= 0 ? `+$${finalNet}` : `-$${Math.abs(finalNet)}`})`;
+        return `${p.name} (HCP ${p.hcp}): Gross ${p.score} / Net ${netScore} (${p.skins} skins | Net ${finalNet >= 0 ? `+$${finalNet}` : `-$${Math.abs(finalNet)}`})`;
       })
       .join('\n');
 
-    const recapText = `THE TURN — Round Recap\n${course} (${teeTime})\n${lines}\nTracked on ${window.location.origin}`;
+    const recapText = `THE TURN - Round Recap\n${course} (${teeTime})\n${lines}\nTracked on ${window.location.origin}`;
     navigator.clipboard.writeText(recapText);
     setRecapCopied(true);
     setTimeout(() => setRecapCopied(false), 2500);
@@ -369,7 +380,7 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
                       Seat {slotIdx + 1} {slotIdx === 0 ? '(Host)' : ''}
                     </div>
                     <div className="font-medium truncate">
-                      {seat ? seat.member_email || 'Tour Pro Active' : 'Open — Share Link'}
+                      {seat ? seat.member_email || 'Tour Pro Active' : 'Open - Share Link'}
                     </div>
                   </div>
                 );
@@ -394,7 +405,7 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
               ) : (
                 <button
                   type="button"
-                  onClick={() => onOpenPaywall?.('Foursome Crew Pass (4 Tour Pro Seats • $299.99/yr)')}
+                  onClick={() => onOpenPaywall?.('Foursome Crew Pass (4 Tour Pro Seats - $299.99/yr)')}
                   className="flex-1 py-2 rounded-xl text-xs font-semibold text-white"
                   style={{ backgroundColor: 'var(--accent-emerald)' }}
                 >
@@ -486,31 +497,39 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
 
       <form onSubmit={handleBuddyJoin} className="rounded-2xl p-3.5 border space-y-2" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
         <div className="text-[11px] font-semibold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--accent-emerald)' }}>
-          <UserPlus size={13} /> Quick RSVP & Outfit Lock
+          <UserPlus size={13} /> Quick RSVP, HCP & Outfit Lock
         </div>
-        <div className="grid grid-cols-5 gap-1.5">
+        <div className="grid grid-cols-6 gap-1.5">
           <input
             type="text"
             placeholder="Name"
             value={joinName}
             onChange={(e) => setJoinName(e.target.value)}
-            className="col-span-2 rounded-xl px-2.5 py-1.5 text-xs border"
+            className="col-span-2 rounded-xl px-2 py-1.5 text-xs border"
+            style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
+          />
+          <input
+            type="number"
+            placeholder="HCP"
+            value={joinHcp}
+            onChange={(e) => setJoinHcp(e.target.value)}
+            className="col-span-1 rounded-xl px-1.5 py-1.5 text-xs font-mono border text-center"
             style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
           />
           <input
             type="text"
-            placeholder="Fit (Polo / Pants / Shoes)"
+            placeholder="Fit"
             value={joinFit}
             onChange={(e) => setJoinFit(e.target.value)}
-            className="col-span-2 rounded-xl px-2.5 py-1.5 text-xs border"
+            className="col-span-2 rounded-xl px-2 py-1.5 text-xs border"
             style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
           />
           <button
             type="submit"
-            className="rounded-xl text-xs font-semibold text-white"
+            className="col-span-1 rounded-xl text-xs font-semibold text-white"
             style={{ backgroundColor: 'var(--accent-emerald)' }}
           >
-            I&apos;m In
+            In
           </button>
         </div>
       </form>
@@ -518,41 +537,58 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
       <div className="rounded-2xl p-4 border space-y-2.5" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-sm flex items-center gap-1.5">
-            <Shirt size={15} style={{ color: 'var(--accent-emerald)' }} /> Lineup & Outfit Check
+            <Shirt size={15} style={{ color: 'var(--accent-emerald)' }} /> Lineup, HCP & Outfit Check
           </h3>
-          <span className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>Tap status to toggle</span>
+          <span className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>Low HCP: {baselineHcp}</span>
         </div>
 
-        {players.map((p) => (
-          <div
-            key={p.id}
-            className="p-3 rounded-xl border flex items-center justify-between"
-            style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
-          >
-            <div>
-              <div className="font-semibold text-sm flex items-center gap-2">
-                {p.name}
-                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border" style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-secondary)' }}>
-                  {p.tee} Tees
-                </span>
-              </div>
-              <div className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>{p.fit}</div>
-            </div>
-
-            <button
-              onClick={() => cycleStatus(p.id)}
-              className={`text-xs font-mono font-bold px-3 py-1 rounded-full ${
-                p.status === 'IN'
-                  ? 'bg-emerald-700/20 text-emerald-500'
-                  : p.status === 'MAYBE'
-                  ? 'bg-amber-500/20 text-amber-500'
-                  : 'bg-red-500/20 text-red-400'
-              }`}
+        {players.map((p) => {
+          const playingStrokes = Math.max(0, (Number(p.hcp) || 0) - baselineHcp);
+          const netScore = p.score - playingStrokes;
+          return (
+            <div
+              key={p.id}
+              className="p-3 rounded-xl border flex items-center justify-between gap-2"
+              style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
             >
-              {p.status}
-            </button>
-          </div>
-        ))}
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold text-sm flex items-center gap-2 flex-wrap">
+                  <span>{p.name}</span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border" style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-secondary)' }}>
+                    {p.tee} Tees
+                  </span>
+                  <label className="text-[10px] font-mono flex items-center gap-1" style={{ color: 'var(--accent-gold)' }}>
+                    HCP
+                    <input
+                      type="number"
+                      value={p.hcp}
+                      onChange={(e) => updatePlayerHcp(p.id, e.target.value)}
+                      className="w-10 rounded px-1 py-0.5 text-center border text-white bg-black/30"
+                      style={{ borderColor: 'var(--border-subtle)' }}
+                    />
+                  </label>
+                </div>
+                <div className="text-xs mt-0.5 truncate" style={{ color: 'var(--text-secondary)' }}>{p.fit}</div>
+                <div className="text-[10px] font-mono mt-0.5" style={{ color: 'var(--accent-emerald)' }}>
+                  Gross {p.score} • Net {netScore} (-{playingStrokes} strokes)
+                </div>
+              </div>
+
+              <button
+                onClick={() => cycleStatus(p.id)}
+                className={`text-xs font-mono font-bold px-3 py-1 rounded-full shrink-0 ${
+                  p.status === 'IN'
+                    ? 'bg-emerald-700/20 text-emerald-500'
+                    : p.status === 'MAYBE'
+                    ? 'bg-amber-500/20 text-amber-500'
+                    : 'bg-red-500/20 text-red-400'
+                }`}
+              >
+                {p.status}
+              </button>
+            </div>
+          );
+        })}
       </div>
 
       <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
@@ -592,14 +628,16 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
 
         <div className="space-y-2">
           {activePlayers.map((p) => {
+            const playingStrokes = Math.max(0, (Number(p.hcp) || 0) - baselineHcp);
+            const netScore = p.score - playingStrokes;
             const skinNet = p.skins * skinValue * (activeCount - 1) - (totalSkins - p.skins) * skinValue;
             const totalSettlement = skinNet - perPlayerTab;
             return (
               <div key={p.id} className="flex items-center justify-between text-xs p-2.5 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
                 <div>
-                  <div className="font-semibold">{p.name}</div>
+                  <div className="font-semibold">{p.name} <span className="font-mono text-[10px] opacity-75">(Net {netScore})</span></div>
                   <div className="text-[10px] font-mono" style={{ color: 'var(--text-secondary)' }}>
-                    Skins: {skinNet >= 0 ? `+$${skinNet}` : `-$${Math.abs(skinNet)}`} • Tab: -${perPlayerTab}
+                    Skins: {skinNet >= 0 ? `+$${skinNet}` : `-$${Math.abs(skinNet)}`} - Tab: -${perPlayerTab}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -621,10 +659,10 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
           <span className="text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--accent-emerald)' }}>
             <Award size={15} /> Post-Round Recap Card
           </span>
-          <span className="text-[10px] font-mono" style={{ color: 'var(--text-secondary)' }}>GROUP SHARE READY</span>
+          <span className="text-[10px] font-mono" style={{ color: 'var(--text-secondary)' }}>GROSS + NET READY</span>
         </div>
         <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-          Copy a clean summary of today&apos;s scores, skins, and 19th-hole split to drop straight into your foursome group chat.
+          Copy a clean summary of today&apos;s handicaps, gross/net scores, skins, and 19th-hole split to drop straight into your foursome group chat.
         </p>
         <button
           type="button"
