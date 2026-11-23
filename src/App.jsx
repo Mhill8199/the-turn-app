@@ -4,17 +4,26 @@ import { useTheme } from './context/ThemeContext';
 import { useAuth } from './context/AuthContext';
 import PrepWardrobe from './pages/PrepWardrobe';
 import CourseLayout from './pages/CourseLayout';
-import StockBag from './pages/StockBag';
+import StockBag, { DEFAULT_CUSTOM_BAG } from './pages/StockBag';
 import FoursomeHub from './pages/FoursomeHub';
 import AuthModal from './components/AuthModal';
 
 export default function App() {
   const { theme, toggleTheme } = useTheme();
   const { user, profile, signOut } = useAuth();
-  const [activeTab, setActiveTab] = useState('prep');
+  const [activeTab, setActiveTab] = useState('course');
   const [demoPro, setDemoPro] = useState(false);
   const [paywallFeature, setPaywallFeature] = useState(null);
   const [authOpen, setAuthOpen] = useState(false);
+
+  const [clubs, setClubs] = useState(() => {
+    try {
+      const saved = localStorage.getItem('the-turn-bag');
+      return saved ? JSON.parse(saved) : DEFAULT_CUSTOM_BAG;
+    } catch {
+      return DEFAULT_CUSTOM_BAG;
+    }
+  });
 
   const isPro = profile?.tier === 'tour_pro' || demoPro;
 
@@ -78,10 +87,10 @@ export default function App() {
       </header>
 
       <main className="flex-1 px-4 pt-4">
-        {activeTab === 'prep' && <PrepWardrobe isPro={isPro} onOpenPaywall={setPaywallFeature} />}
-        {activeTab === 'course' && <CourseLayout isPro={isPro} onOpenPaywall={setPaywallFeature} />}
-        {activeTab === 'bag' && <StockBag />}
+        {activeTab === 'course' && <CourseLayout clubs={clubs} isPro={isPro} onOpenPaywall={setPaywallFeature} />}
+        {activeTab === 'bag' && <StockBag clubs={clubs} setClubs={setClubs} />}
         {activeTab === 'foursome' && <FoursomeHub />}
+        {activeTab === 'prep' && <PrepWardrobe isPro={isPro} onOpenPaywall={setPaywallFeature} />}
       </main>
 
       {authOpen && <AuthModal onClose={() => setAuthOpen(false)} />}
@@ -94,7 +103,7 @@ export default function App() {
             </div>
             <h3 className="text-lg font-bold">{paywallFeature}</h3>
             <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-              Upgrade to Tour Pro (.99/yr) for AI flat-lay photo uploads, Hard Mode trip packing, Stock Yardage course target arcs, and Apple Watch / Meta Glasses integration.
+              Upgrade to Tour Pro ($49.99/yr) for full-bag atmospheric shot simulations, dew-point rollout adjustments, AI flat-lay closet photos, and Apple Watch / Meta Glasses caddie sync.
             </p>
             <div className="flex gap-2">
               <button
@@ -121,10 +130,10 @@ export default function App() {
         style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
       >
         {[
-          { id: 'prep', label: 'Prep & Fit', icon: Shirt },
           { id: 'course', label: 'Course', icon: Compass },
-          { id: 'bag', label: 'The Bag', icon: Briefcase },
+          { id: 'bag', label: 'My Bag', icon: Briefcase },
           { id: 'foursome', label: 'Foursome', icon: Users },
+          { id: 'prep', label: 'Prep & Fit', icon: Shirt },
         ].map((tab) => {
           const Icon = tab.icon;
           const active = activeTab === tab.id;
