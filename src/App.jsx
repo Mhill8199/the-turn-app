@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect } from 'react';
-import { Sun, Moon, Shirt, Compass, Briefcase, Users, Crown, LogIn, LogOut, Watch, Glasses, X, ShieldCheck, Check, Loader2 } from 'lucide-react';
+import { Sun, Moon, Shirt, Compass, Briefcase, Users, Crown, LogIn, LogOut, Watch, Glasses, X, ShieldCheck, Check, Loader2, KeyRound, Copy } from 'lucide-react';
 import { useTheme } from './context/ThemeContext';
 import { useAuth } from './context/AuthContext';
 import { supabase } from './lib/supabase';
@@ -25,6 +25,8 @@ export default function App() {
   const [pendingCrewCode, setPendingCrewCode] = useState(() => new URLSearchParams(window.location.search).get('crew') || '');
   const [authOpen, setAuthOpen] = useState(false);
   const [wearableOpen, setWearableOpen] = useState(false);
+  const [tokenCopied, setTokenCopied] = useState(false);
+  const [tokenStatus, setTokenStatus] = useState('');
 
   const [clubs, setClubs] = useState(() => {
     try {
@@ -47,7 +49,6 @@ export default function App() {
     }
   }, [refreshProfile]);
 
-  // Auto-claim a Foursome Crew Pass seat when ?crew=TURN-XXXXXX is in the URL
   useEffect(() => {
     if (!pendingCrewCode) return;
     if (!user?.id) {
@@ -71,6 +72,32 @@ export default function App() {
         window.history.replaceState({}, '', window.location.pathname);
       });
   }, [pendingCrewCode, user?.id, refreshProfile]);
+
+  const handleCopyWearableToken = async () => {
+    setTokenStatus('');
+    if (!user) {
+      setWearableOpen(false);
+      setAuthOpen(true);
+      return;
+    }
+
+    const { data, error } = await supabase.auth.getSession();
+    const token = data?.session?.access_token;
+
+    if (error || !token) {
+      setTokenStatus('Could not read active session token — try signing out and back in.');
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(`Bearer ${token}`);
+      setTokenCopied(true);
+      setTokenStatus('Copied Bearer token for Apple Shortcuts / wearable headers.');
+      setTimeout(() => setTokenCopied(false), 2500);
+    } catch {
+      setTokenStatus('Clipboard blocked — grant clipboard permission and try again.');
+    }
+  };
 
   const handleStartCheckout = async () => {
     setCheckoutError('');
@@ -202,7 +229,7 @@ export default function App() {
             clubs={clubs}
             isPro={isPro}
             onOpenPaywall={(feat) => { setCheckoutError(''); setPaywallFeature(feat); }}
-            onOpenWearable={() => setWearableOpen(true)}
+            onOpenWearable={() => { setTokenStatus(''); setWearableOpen(true); }}
           />
         )}
         {activeTab === 'bag' && <StockBag clubs={clubs} setClubs={setClubs} />}
@@ -252,6 +279,32 @@ export default function App() {
               <div className="text-xs text-emerald-400">
                 &ldquo;Pull {leadClub?.club_type}. Current wind and dew point keep your rollout short of the right bunker.&rdquo;
               </div>
+            </div>
+
+            <div className="p-3.5 rounded-xl border space-y-2" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs">
+                  <div className="font-semibold flex items-center gap-1.5">
+                    <KeyRound size={13} style={{ color: 'var(--accent-gold)' }} /> Personal Bag Auth Header
+                  </div>
+                  <div className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>
+                    {user ? `Signed in as ${user.email}` : 'Sign in to copy your personal Bearer token'}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCopyWearableToken}
+                  className="px-3 py-2 rounded-xl text-xs font-semibold text-white flex items-center gap-1.5 shrink-0"
+                  style={{ backgroundColor: 'var(--accent-emerald)' }}
+                >
+                  {tokenCopied ? <><Check size={13} /> Copied</> : <><Copy size={13} /> Copy Wearable Token</>}
+                </button>
+              </div>
+              {tokenStatus && (
+                <div className="text-[11px]" style={{ color: 'var(--accent-gold)' }}>
+                  {tokenStatus}
+                </div>
+              )}
             </div>
           </div>
         </div>
