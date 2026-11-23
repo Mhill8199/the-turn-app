@@ -1,5 +1,7 @@
 ﻿import { useState, useEffect } from 'react';
-import { Wand2, AlertTriangle, Plus, Trash2, Check } from 'lucide-react';
+import { Wand2, AlertTriangle, Plus, Trash2, Check, RefreshCw, RotateCcw } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../context/AuthContext';
 
 export const DEFAULT_CUSTOM_BAG = [
   { id: '1', club_type: 'Driver', loft: '10.5°', carry_yards: 265, total_yards: 284, shot_shape: 'Fade', bounce_grind: '', grip_model: 'MCC Plus4', rounds_on_grip: 24 },
@@ -17,10 +19,12 @@ export const DEFAULT_CUSTOM_BAG = [
 ];
 
 export default function StockBag({ clubs, setClubs }) {
+  const { user } = useAuth();
   const [driverInput, setDriverInput] = useState(265);
   const [sevenIronInput, setSevenIronInput] = useState(165);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [addClubOpen, setAddClubOpen] = useState(false);
+  const [syncMsg, setSyncMsg] = useState('');
 
   const [newClubName, setNewClubName] = useState('');
   const [newLoft, setNewLoft] = useState('');
@@ -31,6 +35,54 @@ export default function StockBag({ clubs, setClubs }) {
   useEffect(() => {
     localStorage.setItem('the-turn-bag', JSON.stringify(clubs));
   }, [clubs]);
+
+  // Load user's saved clubs from Supabase when signed in
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase
+      .from('golf_clubs')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('sort_order', { ascending: true })
+      .then(({ data }) => {
+        if (data && data.length > 0) {
+          setClubs(
+            data.map((row) => ({
+              id: row.id,
+              club_type: row.club_type,
+              loft: row.loft ? `${row.loft}°` : '',
+              carry_yards: row.carry_yards,
+              total_yards: row.total_yards || row.carry_yards,
+              shot_shape: row.shot_shape || 'Straight',
+              bounce_grind: row.bounce_grind || '',
+              grip_model: row.grip_model || 'Tour Velvet',
+              rounds_on_grip: row.rounds_on_grip || 0,
+            }))
+          );
+        }
+      });
+  }, [user?.id, setClubs]);
+
+  const syncBagToSupabase = async (updatedList) => {
+    if (!user?.id) return;
+    setSyncMsg('Syncing bag...');
+    await supabase.from('golf_clubs').delete().eq('user_id', user.id);
+    const rows = updatedList.map((c, idx) => ({
+      user_id: user.id,
+      club_type: c.club_type,
+      loft: parseFloat(String(c.loft).replace('°', '')) || null,
+      bounce_grind: c.bounce_grind || null,
+      carry_yards: c.carry_yards,
+      total_yards: c.total_yards,
+      shot_shape: (c.shot_shape || 'straight').toLowerCase(),
+      grip_model: c.grip_model || null,
+      rounds_on_grip: c.rounds_on_grip || 0,
+      sort_order: idx + 1,
+    }));
+    await supabase.from('golf_clubs').insert(rows);
+    setSyncMsg('Synced to cloud');
+    setTimeout(() => setSyncMsg(''), 2000);
+  };
 
   const runQuickFill = () => {
     const d = Number(driverInput) || 260;
@@ -52,13 +104,14 @@ export default function StockBag({ clubs, setClubs }) {
       '60° Wedge': Math.max(50, i7 - step * 6 - 3),
     };
 
-    setClubs((prev) =>
-      prev.map((c) => {
-        const carry = mapped[c.club_type] ?? c.carry_yards;
-        const rollout = c.club_type === 'Driver' ? 19 : c.club_type.includes('Wood') ? 14 : c.club_type.includes('Iron') ? 5 : 1;
-        return { ...c, carry_yards: carry, total_yards: carry + rollout };
-      })
-    );
+    const next = clubs.map((c) => {
+      const carry = mapped[c.club_type] ?? c.carry_yards;
+      const rollout = c.club_type === 'Driver' ? 19 : c.club_type.includes('Wood') ? 14 : c.club_type.includes('Iron') ? 5 : 1;
+      return { ...c, carry_yards: carry, total_yards: carry + rollout };
+    });
+
+    setClubs(next);
+    syncBagToSupabase(next);
     setWizardOpen(false);
   };
 
@@ -78,20 +131,35 @@ export default function StockBag({ clubs, setClubs }) {
       grip_model: 'Custom Grip',
       rounds_on_grip: 0,
     };
-    setClubs((prev) => [...prev, created].sort((a, b) => b.carry_yards - a.carry_yards));
+    const next = [...clubs, created].sort((a, b) => b.carry_yards - a.carry_yards);
+    setClubs(next);
+    syncBagToSupabase(next);
     setNewClubName('');
     setNewLoft('');
     setAddClubOpen(false);
   };
 
   const updateClubField = (id, field, value) => {
-    setClubs((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, [field]: value } : c))
-    );
+    const next = clubs.map((c) => (c.id === id ? { ...c, [field]: value } : c));
+    setClubs(next);
   };
 
   const removeClub = (id) => {
-    setClubs((prev) => prev.filter((c) => c.id !== id));
+    const next = clubs.filter((c) => c.id !== id);
+    setClubs(next);
+    syncBagToSupabase(next);
+  };
+
+  const logRoundPlayed = () => {
+    const next = clubs.map((c) => ({ ...c, rounds_on_grip: (c.rounds_on_grip || 0) + 1 }));
+    setClubs(next);
+    syncBagToSupabase(next);
+  };
+
+  const regripWornClubs = () => {
+    const next = clubs.map((c) => (c.rounds_on_grip >= 40 ? { ...c, rounds_on_grip: 0 } : c));
+    setClubs(next);
+    syncBagToSupabase(next);
   };
 
   const wornGripsCount = clubs.filter((c) => c.rounds_on_grip >= 40).length;
@@ -101,7 +169,9 @@ export default function StockBag({ clubs, setClubs }) {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-bold">My Custom Golf Bag ({clubs.length}/14)</h2>
-          <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Live-synced to Course Caddie & Target Rings</p>
+          <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+            {syncMsg || 'Live-synced to Course Caddie & Target Rings'}
+          </p>
         </div>
         <div className="flex gap-1.5">
           <button
@@ -121,11 +191,30 @@ export default function StockBag({ clubs, setClubs }) {
         </div>
       </div>
 
-      {/* Add Custom Club Form */}
+      {/* Round Counter & Cloud Save Strip */}
+      <div className="flex gap-2">
+        <button
+          onClick={logRoundPlayed}
+          className="flex-1 py-2 px-3 rounded-xl border text-xs font-medium flex items-center justify-center gap-1.5"
+          style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
+        >
+          <RefreshCw size={13} /> +1 Round to All Grips
+        </button>
+        {user && (
+          <button
+            onClick={() => syncBagToSupabase(clubs)}
+            className="px-3 py-2 rounded-xl border text-xs font-semibold"
+            style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-emerald)', color: 'var(--accent-emerald)' }}
+          >
+            Save Cloud
+          </button>
+        )}
+      </div>
+
       {addClubOpen && (
         <form onSubmit={handleAddClub} className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
           <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent-gold)' }}>
-            Add Custom Club (7-Wood, Driving Iron, Wedge, etc.)
+            Add Custom Club
           </div>
           <div className="grid grid-cols-3 gap-2">
             <input
@@ -187,7 +276,6 @@ export default function StockBag({ clubs, setClubs }) {
         </form>
       )}
 
-      {/* Quick-Fill Gapping Wizard */}
       {wizardOpen && (
         <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
           <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent-gold)' }}>
@@ -226,15 +314,21 @@ export default function StockBag({ clubs, setClubs }) {
       )}
 
       {wornGripsCount > 0 && (
-        <div className="rounded-2xl p-3 border flex items-center justify-between" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-gold)' }}>
+        <div className="rounded-2xl p-3 border flex items-center justify-between gap-2" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-gold)' }}>
           <div className="flex items-center gap-2">
             <AlertTriangle size={16} style={{ color: 'var(--accent-gold)' }} />
-            <span className="text-xs font-medium">{wornGripsCount} clubs past 40 rounds — fresh grips restore traction</span>
+            <span className="text-xs font-medium">{wornGripsCount} clubs over 40 rds</span>
           </div>
+          <button
+            onClick={regripWornClubs}
+            className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border flex items-center gap-1 shrink-0"
+            style={{ borderColor: 'var(--accent-gold)', color: 'var(--accent-gold)' }}
+          >
+            <RotateCcw size={11} /> Log Regrip
+          </button>
         </div>
       )}
 
-      {/* Editable Club List */}
       <div className="space-y-2">
         {clubs.map((club, idx) => {
           const prevCarry = idx > 0 ? clubs[idx - 1].carry_yards : null;
@@ -271,7 +365,7 @@ export default function StockBag({ clubs, setClubs }) {
                     <option value="Fade">Fade</option>
                     <option value="Draw">Draw</option>
                   </select>
-                  <span>{club.rounds_on_grip} rds</span>
+                  <span className={club.rounds_on_grip >= 40 ? 'text-amber-500 font-semibold' : ''}>{club.rounds_on_grip} rds</span>
                   {gap !== null && gap > 18 && <span className="text-amber-500 font-semibold">{gap}y gap</span>}
                 </div>
               </div>

@@ -13,10 +13,12 @@ import {
   Plus,
   X,
   Search,
+  Flag,
 } from 'lucide-react';
 import { COURSE_PRESETS, fetchCourseWeather, degreesToCompass, calculateShotPhysics } from '../lib/weatherPhysics';
 
 const CUSTOM_COURSES_KEY = 'the-turn-custom-courses';
+const SCORES_KEY = 'the-turn-scores';
 
 async function fetchElevationFt(lat, lon) {
   try {
@@ -30,7 +32,7 @@ async function fetchElevationFt(lat, lon) {
   }
 }
 
-export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall }) {
+export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall, onOpenWearable }) {
   const [customCourses, setCustomCourses] = useState(() => {
     try {
       const saved = localStorage.getItem(CUSTOM_COURSES_KEY);
@@ -40,8 +42,16 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall 
     }
   });
 
-  const allCourses = [...customCourses, ...COURSE_PRESETS];
+  const [scores, setScores] = useState(() => {
+    try {
+      const saved = localStorage.getItem(SCORES_KEY);
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
 
+  const allCourses = [...customCourses, ...COURSE_PRESETS];
   const [courseId, setCourseId] = useState(() => allCourses[0]?.id || COURSE_PRESETS[0].id);
   const [holeIdx, setHoleIdx] = useState(0);
   const [selectedClubId, setSelectedClubId] = useState(clubs[1]?.id || clubs[0]?.id || '1');
@@ -51,7 +61,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall 
 
   // Custom Course / Hole Creator state
   const [creatorOpen, setCreatorOpen] = useState(false);
-  const [creatorMode, setCreatorMode] = useState('hole'); // 'hole' | 'course'
+  const [creatorMode, setCreatorMode] = useState('hole');
   const [newCourseName, setNewCourseName] = useState('');
   const [newCourseCity, setNewCourseCity] = useState('');
   const [newCourseElev, setNewCourseElev] = useState(1200);
@@ -80,6 +90,10 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall 
   useEffect(() => {
     localStorage.setItem(CUSTOM_COURSES_KEY, JSON.stringify(customCourses));
   }, [customCourses]);
+
+  useEffect(() => {
+    localStorage.setItem(SCORES_KEY, JSON.stringify(scores));
+  }, [scores]);
 
   const activeCourse = allCourses.find((c) => c.id === courseId) || allCourses[0] || COURSE_PRESETS[0];
   const activeHole = activeCourse.holes[holeIdx] || activeCourse.holes[0];
@@ -274,6 +288,41 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall 
 
   const bestClub = [...evaluatedClubs].sort((a, b) => b.score - a.score)[0];
   const activeClub = evaluatedClubs.find((c) => c.id === selectedClubId) || bestClub || evaluatedClubs[0];
+
+  // Find best approach club for the remaining yardage after activeClub lands
+  const pairedApproachClub =
+    activeHole.par > 3 && activeClub && activeClub.remainingToPin > 25
+      ? [...evaluatedClubs].sort(
+          (a, b) => Math.abs(a.effectiveCarry - activeClub.remainingToPin) - Math.abs(b.effectiveCarry - activeClub.remainingToPin)
+        )[0]
+      : null;
+
+  // Dew-point green speed (Stimpmeter) & Front/Middle/Back yardages
+  const dewSpread = weather.tempF - weather.dewPointF;
+  const estStimp = dewSpread <= 4 ? '9.2 (Morning Dew)' : dewSpread <= 10 ? '10.5 (Medium-Fast)' : '11.8 (Dry & Slick)';
+  const frontYards = Math.max(40, activeHole.yards - 12);
+  const backYards = activeHole.yards + 14;
+
+  // Scorecard & +/- Par math
+  const courseScores = scores[activeCourse.id] || {};
+  const currentHoleScore = courseScores[activeHole.number] ?? activeHole.par;
+  const setHoleScore = (val) => {
+    const clamped = Math.max(1, Math.min(12, val));
+    setScores((prev) => ({
+      ...prev,
+      [activeCourse.id]: {
+        ...(prev[activeCourse.id] || {}),
+        [activeHole.number]: clamped,
+      },
+    }));
+  };
+
+  const holesLogged = Object.keys(courseScores).length;
+  const totalStrokes = Object.values(courseScores).reduce((acc, n) => acc + n, 0);
+  const parForLogged = activeCourse.holes
+    .filter((h) => courseScores[h.number] !== undefined)
+    .reduce((acc, h) => acc + h.par, 0);
+  const relPar = totalStrokes - parForLogged;
 
   return (
     <div className="space-y-4 pb-24">
@@ -593,7 +642,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall 
         </div>
       )}
 
-      {/* Overhead Course Visualizer with Custom Bag Target Arcs */}
+      {/* Overhead Course Visualizer with Two-Shot Pairing & Custom Bag Arcs */}
       {activeClub && (
         <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
           <div className="flex items-center justify-between text-xs">
@@ -647,10 +696,14 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall 
                     strokeDasharray="5 4"
                   />
                   <line x1="130" y1={carryY} x2="130" y2={totalY} stroke={strokeCol} strokeWidth="2" />
+                  {/* Dotted Approach Line to Green */}
+                  {pairedApproachClub && (
+                    <line x1="130" y1={totalY} x2="136" y2="39" stroke="#23865D" strokeWidth="1.5" strokeDasharray="3 3" />
+                  )}
                   <circle cx="130" cy={carryY} r="4.5" fill={strokeCol} />
                   <circle cx="130" cy={totalY} r="3" fill="#FFFFFF" stroke={strokeCol} strokeWidth="1.5" />
                   <text x="140" y={carryY + 3} fontSize="9.5" fontWeight="bold" fill={strokeCol}>
-                    {activeClub.club_type}: {activeClub.effectiveCarry}y carry ({activeClub.effectiveTotal}y)
+                    {activeClub.club_type}: {activeClub.effectiveCarry}y ({activeClub.effectiveTotal}y)
                   </text>
                 </>
               );
@@ -658,6 +711,18 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall 
 
             <rect x="110" y="283" width="26" height="10" rx="3" fill="#97A39C" />
           </svg>
+
+          {/* 2-Shot Layup & Approach Pairing Readout */}
+          {pairedApproachClub && (
+            <div className="p-2.5 rounded-xl border text-xs flex items-center justify-between" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
+              <span>
+                <strong>2-Shot Combo:</strong> {activeClub.club_type} ({activeClub.effectiveTotal}y) → <strong>{pairedApproachClub.club_type}</strong> ({activeClub.remainingToPin}y in)
+              </span>
+              <span className="font-mono text-[11px]" style={{ color: 'var(--accent-emerald)' }}>
+                {pairedApproachClub.effectiveCarry}y carry
+              </span>
+            </div>
+          )}
 
           <div className="flex gap-2 overflow-x-auto pb-1">
             {evaluatedClubs.slice(0, 8).map((club) => (
@@ -693,14 +758,77 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall 
         </div>
       )}
 
-      <div className="rounded-2xl p-3.5 border flex items-center justify-between" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
+      {/* Green Complex & Dew-Point Stimp Estimator */}
+      <div className="rounded-2xl p-4 border space-y-2.5" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--accent-emerald)' }}>
+            <Flag size={14} /> Green Complex & Dew-Point Stimp
+          </span>
+          <span className="text-[11px] font-mono font-semibold" style={{ color: 'var(--accent-gold)' }}>{estStimp}</span>
+        </div>
+
+        <div className="grid grid-cols-3 gap-2 text-center">
+          <div className="p-2 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
+            <div className="text-[10px] uppercase" style={{ color: 'var(--text-secondary)' }}>Front</div>
+            <div className="font-mono font-bold text-sm">{frontYards}y</div>
+          </div>
+          <div className="p-2 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--accent-emerald)' }}>
+            <div className="text-[10px] uppercase" style={{ color: 'var(--accent-emerald)' }}>Middle</div>
+            <div className="font-mono font-bold text-sm">{activeHole.yards}y</div>
+          </div>
+          <div className="p-2 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
+            <div className="text-[10px] uppercase" style={{ color: 'var(--text-secondary)' }}>Back</div>
+            <div className="font-mono font-bold text-sm">{backYards}y</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Live Hole Scorecard & Ghost Pacer */}
+      <div className="rounded-2xl p-4 border flex items-center justify-between" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
+        <div>
+          <div className="text-xs font-semibold">Hole {activeHole.number} Score (Par {activeHole.par})</div>
+          <div className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>
+            {holesLogged > 0
+              ? `Round Pace: ${relPar === 0 ? 'E' : relPar > 0 ? `+${relPar}` : relPar} (${holesLogged} holes)`
+              : 'Tap + / - to log hole strokes'}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setHoleScore(currentHoleScore - 1)}
+            className="w-8 h-8 rounded-lg border font-bold text-sm"
+            style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
+          >
+            -
+          </button>
+          <span className="w-7 text-center font-mono font-bold text-base">{currentHoleScore}</span>
+          <button
+            type="button"
+            onClick={() => setHoleScore(currentHoleScore + 1)}
+            className="w-8 h-8 rounded-lg border font-bold text-sm"
+            style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
+          >
+            +
+          </button>
+        </div>
+      </div>
+
+      {/* Wearable Sync Status Button */}
+      <button
+        type="button"
+        onClick={onOpenWearable}
+        className="w-full rounded-2xl p-3.5 border flex items-center justify-between text-left"
+        style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
+      >
         <div className="flex items-center gap-2 text-xs">
           <Watch size={15} style={{ color: 'var(--accent-gold)' }} />
           <Glasses size={15} style={{ color: 'var(--accent-gold)' }} />
-          <span>Watch & Meta Glasses Sync: <strong>{bestClub?.club_type} ({bestClub?.effectiveCarry}y)</strong></span>
+          <span>Watch & Meta Glasses Feed: <strong>{bestClub?.club_type} ({bestClub?.effectiveCarry}y)</strong></span>
         </div>
-        <span className="text-[11px] font-mono" style={{ color: 'var(--text-secondary)' }}>{activeClub?.turfCondition.split(' ')[0]}</span>
-      </div>
+        <span className="text-[11px] font-semibold underline" style={{ color: 'var(--accent-gold)' }}>Preview HUD</span>
+      </button>
     </div>
   );
 }
