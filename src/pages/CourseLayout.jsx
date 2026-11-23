@@ -18,6 +18,7 @@ import {
   Loader2,
   SlidersHorizontal,
   Globe,
+  LocateFixed,
 } from 'lucide-react';
 import {
   COURSE_PRESETS,
@@ -29,7 +30,7 @@ import {
 } from '../lib/weatherPhysics';
 
 const CUSTOM_COURSES_KEY = 'the-turn-custom-courses';
-const SCORES_KEY = 'the-turn-scores';
+const SCORES_KEY = 'the-turn-scores-v2';
 const PINS_KEY = 'the-turn-miss-pins';
 
 const TEE_BOXES = [
@@ -46,6 +47,18 @@ const PIN_TYPES = [
 ];
 
 const SAT_ZOOM_LEVELS = [15, 16, 17];
+
+function calcGpsYards(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const meters = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(meters * 1.09361);
+}
 
 function buildSatelliteTileGrid(lat, lon, zoom = 16) {
   const safeLat = Math.max(-85, Math.min(85, Number(lat) || 33.8139));
@@ -128,6 +141,11 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   const [useSatTiles, setUseSatTiles] = useState(true);
   const [satZoom, setSatZoom] = useState(16);
   const [tileError, setTileError] = useState(false);
+
+  // Live GPS Shot Distance Tracker state
+  const [shotStartGps, setShotStartGps] = useState(null);
+  const [lastMeasuredShot, setLastMeasuredShot] = useState(null);
+  const [trackingShot, setTrackingShot] = useState(false);
 
   const [creatorOpen, setCreatorOpen] = useState(false);
   const [creatorMode, setCreatorMode] = useState('hole');
@@ -453,25 +471,118 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   const frontYards = Math.max(40, activeHole.yards - 12);
   const backYards = activeHole.yards + 14;
 
+  // Hole Stat & Score State (Total Strokes, Fairway Hit, GIR, Putts, Tracked Drive)
   const courseScores = scores[activeCourse.id] || {};
-  const currentHoleScore = courseScores[activeHole.number] ?? activeHole.par;
-  const setHoleScore = (val) => {
-    const clamped = Math.max(1, Math.min(12, val));
+  const rawEntry = courseScores[activeHole.number];
+  const defaultGir = activeHole.par <= 3 ? true : true;
+  const currentStat =
+    typeof rawEntry === 'number'
+      ? { strokes: rawEntry, putts: 2, fir: activeHole.par > 3 ? 'hit' : 'na', gir: rawEntry - 2 <= activeHole.par - 2 }
+      : rawEntry || {
+          strokes: activeHole.par,
+          putts: 2,
+          fir: activeHole.par > 3 ? 'hit' : 'na',
+          gir: defaultGir,
+        };
+
+  const updateHoleStat = (patch) => {
+    const nextStrokes = Math.max(1, Math.min(12, patch.strokes ?? currentStat.strokes));
+    const nextPutts = Math.max(0, Math.min(nextStrokes, patch.putts ?? currentStat.putts));
+    const autoGir = nextStrokes - nextPutts <= activeHole.par - 2;
+    const nextEntry = {
+      strokes: nextStrokes,
+      putts: nextPutts,
+      fir: patch.fir ?? currentStat.fir,
+      gir: patch.gir !== undefined ? patch.gir : autoGir,
+      driveYards: patch.driveYards ?? currentStat.driveYards ?? null,
+    };
+
     setScores((prev) => ({
       ...prev,
       [activeCourse.id]: {
         ...(prev[activeCourse.id] || {}),
-        [activeHole.number]: clamped,
+        [activeHole.number]: nextEntry,
       },
     }));
   };
 
-  const holesLogged = Object.keys(courseScores).length;
-  const totalStrokes = Object.values(courseScores).reduce((acc, n) => acc + n, 0);
-  const parForLogged = activeCourse.holes
-    .filter((h) => courseScores[h.number] !== undefined)
-    .reduce((acc, h) => acc + h.par, 0);
+  // Live GPS Shot Distance & Fairway Tracker
+  const handleMarkShotStart = () => {
+    if (!navigator.geolocation) {
+      setGpsStatus('GPS not supported on this device.');
+      return;
+    }
+    setTrackingShot(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setShotStartGps({
+          lat: pos.coords.latitude,
+          lon: pos.coords.longitude,
+          club: activeClub?.club_type || 'Driver',
+          hole: activeHole.number,
+        });
+        setLastMeasuredShot(null);
+        setTrackingShot(false);
+      },
+      (err) => {
+        setGpsStatus(`Shot GPS error: ${err.message}`);
+        setTrackingShot(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
+  const handleMeasureShotEnd = () => {
+    if (!shotStartGps || !navigator.geolocation) return;
+    setTrackingShot(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const yards = calcGpsYards(shotStartGps.lat, shotStartGps.lon, pos.coords.latitude, pos.coords.longitude);
+        const measured = { yards, club: shotStartGps.club, hole: shotStartGps.hole };
+        setLastMeasuredShot(measured);
+        updateHoleStat({ driveYards: yards });
+        setShotStartGps(null);
+        setTrackingShot(false);
+      },
+      (err) => {
+        setGpsStatus(`Shot GPS error: ${err.message}`);
+        setTrackingShot(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
+  // Round Aggregate Totals (Total Strokes, GIR%, FIR%, Putts)
+  const loggedHoleNumbers = Object.keys(courseScores).map(Number);
+  const holesLogged = loggedHoleNumbers.length;
+  let totalStrokes = 0;
+  let totalPutts = 0;
+  let girHits = 0;
+  let firHits = 0;
+  let firEligible = 0;
+  let parForLogged = 0;
+
+  loggedHoleNumbers.forEach((hNum) => {
+    const holeMeta = activeCourse.holes.find((h) => h.number === hNum) || { par: 4 };
+    const entry = courseScores[hNum];
+    const st = typeof entry === 'number' ? entry : entry.strokes;
+    const pt = typeof entry === 'number' ? 2 : entry.putts ?? 2;
+    const isGir = typeof entry === 'number' ? st - pt <= holeMeta.par - 2 : Boolean(entry.gir);
+    const firVal = typeof entry === 'number' ? 'hit' : entry.fir;
+
+    totalStrokes += st;
+    totalPutts += pt;
+    parForLogged += holeMeta.par;
+    if (isGir) girHits += 1;
+    if (holeMeta.par > 3) {
+      firEligible += 1;
+      if (firVal === 'hit') firHits += 1;
+    }
+  });
+
   const relPar = totalStrokes - parForLogged;
+  const girPct = holesLogged > 0 ? Math.round((girHits / holesLogged) * 100) : 0;
+  const firPct = firEligible > 0 ? Math.round((firHits / firEligible) * 100) : 0;
 
   const shapeShiftX = activeClub?.shot_shape === 'Fade' ? 14 : activeClub?.shot_shape === 'Draw' ? -14 : 0;
   const satTiles = buildSatelliteTileGrid(activeCourse.lat, activeCourse.lon, satZoom);
@@ -1244,6 +1355,195 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         </div>
       )}
 
+      {/* Live GPS Shot Yardage & Fairway Tracker */}
+      <div className="rounded-2xl p-4 border space-y-2.5" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--accent-gold)' }}>
+            <LocateFixed size={14} /> Live GPS Shot Yardage Tracker
+          </span>
+          {(lastMeasuredShot || currentStat.driveYards) && (
+            <span className="text-xs font-mono font-bold" style={{ color: 'var(--accent-emerald)' }}>
+              {lastMeasuredShot ? `${lastMeasuredShot.club}: ${lastMeasuredShot.yards}y` : `Logged: ${currentStat.driveYards}y`}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleMarkShotStart}
+            disabled={trackingShot}
+            className="flex-1 py-2 rounded-xl text-xs font-semibold border"
+            style={{
+              backgroundColor: shotStartGps ? 'rgba(16,185,129,0.16)' : 'var(--bg-elevated)',
+              borderColor: shotStartGps ? 'var(--accent-emerald)' : 'var(--border-subtle)',
+              color: shotStartGps ? 'var(--accent-emerald)' : 'inherit',
+            }}
+          >
+            {shotStartGps ? `Tee Locked (${shotStartGps.club}) • Walk to Ball` : `1. Mark Tee GPS (${activeClub?.club_type || 'Driver'})`}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleMeasureShotEnd}
+            disabled={!shotStartGps || trackingShot}
+            className="flex-1 py-2 rounded-xl text-xs font-semibold text-white disabled:opacity-40"
+            style={{ backgroundColor: 'var(--accent-emerald)' }}
+          >
+            {trackingShot ? 'Reading GPS...' : '2. Measure at Ball'}
+          </button>
+        </div>
+      </div>
+
+      {/* Full Hole-by-Hole Scorecard: Total Strokes, Fairway Hit, GIR & Putts */}
+      <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-emerald)' }}>
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent-emerald)' }}>
+              Hole #{activeHole.number} Scorecard (Par {activeHole.par})
+            </div>
+            <div className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>
+              GIR auto-detects when (Strokes - Putts) &le; {activeHole.par - 2}
+            </div>
+          </div>
+          <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-full" style={{ backgroundColor: 'var(--bg-elevated)', color: 'var(--accent-gold)' }}>
+            {holesLogged > 0 ? `${totalStrokes} (${relPar === 0 ? 'E' : relPar > 0 ? `+${relPar}` : relPar})` : 'Ready'}
+          </span>
+        </div>
+
+        {/* Strokes & Putts Counters */}
+        <div className="grid grid-cols-2 gap-2.5">
+          <div className="p-2.5 rounded-xl border flex items-center justify-between" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
+            <span className="text-xs font-semibold">Total Strokes</span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => updateHoleStat({ strokes: currentStat.strokes - 1 })}
+                className="w-7 h-7 rounded-lg border font-bold text-sm"
+                style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
+              >
+                -
+              </button>
+              <span className="w-5 text-center font-mono font-bold text-base">{currentStat.strokes}</span>
+              <button
+                type="button"
+                onClick={() => updateHoleStat({ strokes: currentStat.strokes + 1 })}
+                className="w-7 h-7 rounded-lg border font-bold text-sm"
+                style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
+              >
+                +
+              </button>
+            </div>
+          </div>
+
+          <div className="p-2.5 rounded-xl border flex items-center justify-between" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
+            <span className="text-xs font-semibold">Putts</span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => updateHoleStat({ putts: currentStat.putts - 1 })}
+                className="w-7 h-7 rounded-lg border font-bold text-sm"
+                style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
+              >
+                -
+              </button>
+              <span className="w-5 text-center font-mono font-bold text-base">{currentStat.putts}</span>
+              <button
+                type="button"
+                onClick={() => updateHoleStat({ putts: currentStat.putts + 1 })}
+                className="w-7 h-7 rounded-lg border font-bold text-sm"
+                style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
+              >
+                +
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Fairway Hit (FIR) & Green in Regulation (GIR) Toggles */}
+        <div className="grid grid-cols-2 gap-2.5 text-xs">
+          {activeHole.par > 3 ? (
+            <div className="p-2.5 rounded-xl border space-y-1.5" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
+              <div className="text-[10px] uppercase font-semibold" style={{ color: 'var(--text-secondary)' }}>Fairway (FIR)</div>
+              <div className="grid grid-cols-3 gap-1">
+                {[
+                  { id: 'left', label: 'Miss L' },
+                  { id: 'hit', label: 'Hit' },
+                  { id: 'right', label: 'Miss R' },
+                ].map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => updateHoleStat({ fir: opt.id })}
+                    className={`py-1 rounded-lg font-semibold text-[11px] border ${
+                      currentStat.fir === opt.id
+                        ? opt.id === 'hit'
+                          ? 'bg-emerald-700 text-white border-emerald-700'
+                          : 'bg-amber-600/30 text-amber-300 border-amber-500'
+                        : ''
+                    }`}
+                    style={currentStat.fir !== opt.id ? { backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' } : {}}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="p-2.5 rounded-xl border flex flex-col justify-center" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
+              <div className="text-[10px] uppercase font-semibold" style={{ color: 'var(--text-secondary)' }}>Fairway (FIR)</div>
+              <div className="text-xs font-mono mt-1 opacity-70">N/A (Par 3)</div>
+            </div>
+          )}
+
+          <div className="p-2.5 rounded-xl border space-y-1.5" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
+            <div className="text-[10px] uppercase font-semibold" style={{ color: 'var(--text-secondary)' }}>Green in Reg (GIR)</div>
+            <div className="grid grid-cols-2 gap-1">
+              {[
+                { val: true, label: 'GIR Yes' },
+                { val: false, label: 'Missed' },
+              ].map((opt) => (
+                <button
+                  key={String(opt.val)}
+                  type="button"
+                  onClick={() => updateHoleStat({ gir: opt.val })}
+                  className={`py-1 rounded-lg font-semibold text-[11px] border ${
+                    Boolean(currentStat.gir) === opt.val
+                      ? opt.val
+                        ? 'bg-emerald-700 text-white border-emerald-700'
+                        : 'bg-red-500/25 text-red-300 border-red-400'
+                      : ''
+                  }`}
+                  style={Boolean(currentStat.gir) !== opt.val ? { backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' } : {}}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Live Round Totals Strip */}
+        <div className="grid grid-cols-4 gap-1.5 pt-1 text-center text-xs">
+          <div className="p-2 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
+            <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Strokes</div>
+            <div className="font-mono font-bold">{holesLogged > 0 ? totalStrokes : '-'}</div>
+          </div>
+          <div className="p-2 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
+            <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>FIR</div>
+            <div className="font-mono font-bold">{firEligible > 0 ? `${firHitCountLabel(firHits, firEligible)} (${firPct}%)` : '-'}</div>
+          </div>
+          <div className="p-2 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
+            <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>GIR</div>
+            <div className="font-mono font-bold">{holesLogged > 0 ? `${girHits}/${holesLogged} (${girPct}%)` : '-'}</div>
+          </div>
+          <div className="p-2 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
+            <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Putts</div>
+            <div className="font-mono font-bold">{holesLogged > 0 ? totalPutts : '-'}</div>
+          </div>
+        </div>
+      </div>
+
       <div className="rounded-2xl p-4 border space-y-2.5" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--accent-emerald)' }}>
@@ -1268,37 +1568,6 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         </div>
       </div>
 
-      <div className="rounded-2xl p-4 border flex items-center justify-between" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
-        <div>
-          <div className="text-xs font-semibold">Hole {activeHole.number} Score (Par {activeHole.par})</div>
-          <div className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>
-            {holesLogged > 0
-              ? `Round Pace: ${relPar === 0 ? 'E' : relPar > 0 ? `+${relPar}` : relPar} (${holesLogged} holes)`
-              : 'Tap + / - to log hole strokes'}
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setHoleScore(currentHoleScore - 1)}
-            className="w-8 h-8 rounded-lg border font-bold text-sm"
-            style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
-          >
-            -
-          </button>
-          <span className="w-7 text-center font-mono font-bold text-base">{currentHoleScore}</span>
-          <button
-            type="button"
-            onClick={() => setHoleScore(currentHoleScore + 1)}
-            className="w-8 h-8 rounded-lg border font-bold text-sm"
-            style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
-          >
-            +
-          </button>
-        </div>
-      </div>
-
       <button
         type="button"
         onClick={onOpenWearable}
@@ -1314,4 +1583,8 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
       </button>
     </div>
   );
+}
+
+function firHitCountLabel(hits, eligible) {
+  return `${hits}/${eligible}`;
 }
