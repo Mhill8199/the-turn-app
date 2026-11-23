@@ -45,6 +45,8 @@ const PIN_TYPES = [
   { id: 'dead', label: 'Dead Zone', color: '#EF4444' },
 ];
 
+const SAT_ZOOM_LEVELS = [15, 16, 17];
+
 function buildSatelliteTileGrid(lat, lon, zoom = 16) {
   const safeLat = Math.max(-85, Math.min(85, Number(lat) || 33.8139));
   const safeLon = Number(lon) || -117.5156;
@@ -124,6 +126,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   const [gpsLoading, setGpsLoading] = useState(false);
   const [simOpen, setSimOpen] = useState(false);
   const [useSatTiles, setUseSatTiles] = useState(true);
+  const [satZoom, setSatZoom] = useState(16);
   const [tileError, setTileError] = useState(false);
 
   const [creatorOpen, setCreatorOpen] = useState(false);
@@ -171,7 +174,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
 
   useEffect(() => {
     setTileError(false);
-  }, [activeCourse.lat, activeCourse.lon, useSatTiles]);
+  }, [activeCourse.lat, activeCourse.lon, useSatTiles, satZoom]);
 
   const activeHole = {
     ...baseHole,
@@ -471,7 +474,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   const relPar = totalStrokes - parForLogged;
 
   const shapeShiftX = activeClub?.shot_shape === 'Fade' ? 14 : activeClub?.shot_shape === 'Draw' ? -14 : 0;
-  const satTiles = buildSatelliteTileGrid(activeCourse.lat, activeCourse.lon, 16);
+  const satTiles = buildSatelliteTileGrid(activeCourse.lat, activeCourse.lon, satZoom);
   const showRealSat = useSatTiles && !tileError;
 
   return (
@@ -878,7 +881,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
             <span className="font-semibold truncate">
               Hole #{activeHole.number} - Par {activeHole.par} - {activeHole.yards} yds
             </span>
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1.5 shrink-0">
               <button
                 type="button"
                 onClick={() => setUseSatTiles(!useSatTiles)}
@@ -889,8 +892,25 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
                   backgroundColor: 'var(--bg-elevated)',
                 }}
               >
-                <Globe size={11} /> {showRealSat ? 'SAT TILES' : 'VECTOR'}
+                <Globe size={11} /> {showRealSat ? 'SAT' : 'VEC'}
               </button>
+              {showRealSat && (
+                <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: 'var(--border-subtle)' }}>
+                  {SAT_ZOOM_LEVELS.map((z) => (
+                    <button
+                      key={z}
+                      type="button"
+                      onClick={() => setSatZoom(z)}
+                      className={`px-1.5 py-0.5 font-mono text-[10px] font-semibold ${
+                        satZoom === z ? 'bg-emerald-700 text-white' : ''
+                      }`}
+                      style={satZoom !== z ? { backgroundColor: 'var(--bg-elevated)', color: 'var(--text-secondary)' } : {}}
+                    >
+                      {z}x
+                    </button>
+                  ))}
+                </div>
+              )}
               <span className="font-mono" style={{ color: 'var(--accent-gold)' }}>
                 {activeClub.headwindMph >= 0 ? `${activeClub.headwindMph} mph Into` : `${Math.abs(activeClub.headwindMph)} mph Helping`}
               </span>
@@ -967,10 +987,8 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               </filter>
             </defs>
 
-            {/* Fallback Vector Terrain */}
             <rect width="280" height="330" fill="url(#earthTerrain)" />
 
-            {/* Real-World GPS-Centered Satellite Tiles Layer */}
             {showRealSat && (
               <g clipPath="url(#satMapClip)">
                 {satTiles.map((t) => (
@@ -989,7 +1007,6 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               </g>
             )}
 
-            {/* Vector Course Terrain Overlay (Full in Vector mode, Subtle Corridor in Satellite mode) */}
             <g opacity={showRealSat ? 0.42 : 1}>
               <path d="M 10 85 Q 140 60 270 95" fill="none" stroke="#34D399" strokeOpacity="0.08" strokeWidth="1" />
               <path d="M 10 175 Q 140 150 270 185" fill="none" stroke="#34D399" strokeOpacity="0.08" strokeWidth="1" />
@@ -1023,11 +1040,9 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               />
             </g>
 
-            {/* Satellite Distance Range Rings (100y / 200y from Pin) */}
             <path d="M 94 140 Q 140 152 186 140" fill="none" stroke="#E2E8F0" strokeOpacity="0.22" strokeDasharray="3 3" />
             <path d="M 86 212 Q 140 226 194 212" fill="none" stroke="#E2E8F0" strokeOpacity="0.22" strokeDasharray="3 3" />
 
-            {/* Water Hazard with Shimmer Ripples */}
             {activeHole.waterCarry && (() => {
               const waterY = Math.max(76, 282 - (activeHole.waterCarry / activeHole.yards) * 224);
               return (
@@ -1047,7 +1062,6 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               );
             })()}
 
-            {/* Fairway & Greenside 3D Sand Bunkers */}
             {activeHole.bunkerStart && (() => {
               const bY = Math.max(66, 282 - (activeHole.bunkerStart / activeHole.yards) * 224);
               return (
@@ -1074,7 +1088,6 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               <ellipse cx="175" cy="48" rx="12.5" ry="8" fill="url(#bunkerSand)" stroke="#8C6A28" strokeWidth="1.1" />
             </g>
 
-            {/* Contoured Putting Green Fringe & Pin Flagstick */}
             <g filter="url(#turfShadow)">
               <ellipse cx="140" cy="44" rx="37" ry="22" fill="#238653" fillOpacity={showRealSat ? 0.72 : 1} />
               <ellipse cx="140" cy="44" rx="33" ry="19" fill="url(#greenCollar)" fillOpacity={showRealSat ? 0.78 : 1} stroke="#A7F3D0" strokeWidth="1.1" />
@@ -1087,7 +1100,6 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               {activeHole.yards}y PIN
             </text>
 
-            {/* User-Dropped Miss-Zone Pins */}
             {currentHolePins.map((pin) => (
               <g key={pin.id}>
                 <circle cx={pin.x} cy={pin.y} r="6.5" fill={pin.color} fillOpacity="0.92" stroke="#FFFFFF" strokeWidth="1.5" />
@@ -1097,7 +1109,6 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               </g>
             ))}
 
-            {/* Shot Arc, Dispersion Cone & Carry/Rollout Markers */}
             {(() => {
               const teeY = activeTee.y;
               const carryY = Math.max(38, teeY - (activeClub.effectiveCarry / activeHole.yards) * (teeY - 44));
@@ -1142,7 +1153,6 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               );
             })()}
 
-            {/* Multi-Tier Tee Box Complex */}
             <rect x="116" y="259" width="48" height="40" rx="6" fill="#1C5E3E" fillOpacity={showRealSat ? 0.78 : 1} stroke="#A7F3D0" strokeOpacity="0.65" strokeWidth="1" filter="url(#turfShadow)" />
             {TEE_BOXES.map((tb) => {
               const selected = tb.id === teeId;
@@ -1170,7 +1180,6 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               );
             })}
 
-            {/* Satellite Wind Compass & Vector HUD (Top Left) */}
             <g transform="translate(34, 34)">
               <circle cx="0" cy="0" r="18" fill="#060D09" fillOpacity="0.86" stroke="#6EE7B7" strokeOpacity="0.65" strokeWidth="1" />
               <g transform={`rotate(${weather.windDirDeg})`}>
@@ -1182,11 +1191,10 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               </text>
             </g>
 
-            {/* Satellite Telemetry Badge (Top Right) */}
-            <g transform="translate(194, 12)">
-              <rect x="0" y="0" width="76" height="15" rx="4" fill="#060D09" fillOpacity="0.85" stroke="#34D399" strokeOpacity="0.4" strokeWidth="0.8" />
-              <text x="38" y="10.5" textAnchor="middle" fontSize="7.5" fontFamily="monospace" fill="#6EE7B7">
-                {showRealSat ? 'SAT' : 'VEC'} • {activeCourse.elevationFt}ft
+            <g transform="translate(184, 12)">
+              <rect x="0" y="0" width="86" height="15" rx="4" fill="#060D09" fillOpacity="0.85" stroke="#34D399" strokeOpacity="0.4" strokeWidth="0.8" />
+              <text x="43" y="10.5" textAnchor="middle" fontSize="7.5" fontFamily="monospace" fill="#6EE7B7">
+                {showRealSat ? `SAT ${satZoom}x` : 'VEC'} • {activeCourse.elevationFt}ft
               </text>
             </g>
           </svg>
