@@ -1,4 +1,9 @@
-﻿import { useState, useEffect } from 'react';
+﻿import WardrobeFlatLay from './components/WardrobeFlatLay';
+import PostRoundAnalyticsAndTrophies from './components/PostRoundAnalyticsAndTrophies';
+import SocialScorecardGenerator from './components/SocialScorecardGenerator';
+import JuniorStudentPassModal from './components/JuniorStudentPassModal';
+import VeteranOwnedBadge from './components/VeteranOwnedBadge';
+import VirtualTryOnStudio from './components/VirtualTryOnStudio';
 import { Sun, Moon, Shirt, Compass, Briefcase, Users, Crown, LogIn, LogOut, Watch, Glasses, X, ShieldCheck, Check, Loader2, KeyRound, Copy, Sliders } from 'lucide-react';
 import { useTheme } from './context/ThemeContext';
 import { useAuth } from './context/AuthContext';
@@ -9,6 +14,8 @@ import StockBag, { DEFAULT_CUSTOM_BAG } from './pages/StockBag';
 import FoursomeHub from './pages/FoursomeHub';
 import AuthModal from './components/AuthModal';
 import OnboardingModal from './components/OnboardingModal';
+
+import React, { useState, useEffect } from 'react';
 
 function SmartGlassesHud({ clubs }) {
   const [targetYards, setTargetYards] = useState(165);
@@ -93,6 +100,28 @@ export default function App() {
       return DEFAULT_CUSTOM_BAG;
     }
   });
+  const [scorecardOpen, setScorecardOpen] = useState(false);
+  const [studentPassOpen, setStudentPassOpen] = useState(false);
+  const [tryOnOpen, setTryOnOpen] = useState(false);
+  const [studentPass, setStudentPass] = useState(() => {
+    try {
+      const saved = localStorage.getItem('the-turn-student-pass');
+      if (!saved) return null;
+      const parsed = JSON.parse(saved);
+      const stillActive = Boolean(parsed?.verified) && Boolean(parsed?.expiresAt) && new Date(parsed.expiresAt) > new Date();
+      return stillActive ? parsed : null;
+    } catch {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    if (studentPass == null) {
+      localStorage.removeItem('the-turn-student-pass');
+    } else {
+      localStorage.setItem('the-turn-student-pass', JSON.stringify(studentPass));
+    }
+  }, [studentPass]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -156,7 +185,7 @@ export default function App() {
     }
   };
 
-  const handleStartCheckout = async () => {
+const handleStartCheckout = async () => {
     setCheckoutError('');
 
     if (!user) {
@@ -184,11 +213,46 @@ export default function App() {
       }
     } catch (err) {
       setCheckoutError(err.message);
-      setDemoPro(true);
     } finally {
       setCheckoutLoading(false);
     }
   };
+
+  if (window.location.pathname === '/cart-hud') {
+    return <OnCourseHoleHUD />;
+  }
+if (window.location.pathname === '/batch2-test') {
+  return (
+    <div className="min-h-screen max-w-md mx-auto p-4 space-y-6 bg-zinc-950 text-white">
+      <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+        <span className="font-bold text-sm tracking-wider uppercase text-emerald-400">Batch 1 & 2 Test Bench</span>
+        <a href="/" className="text-xs px-3 py-1 rounded-lg border border-zinc-700">Back to App</a>
+      </div>
+      <WardrobeFlatLay />
+      <PostRoundAnalyticsAndTrophies />
+    </div>
+  );
+}
+if (window.location.pathname === '/batch3-test') {
+  return (
+    <div className="min-h-screen max-w-md mx-auto p-4 space-y-6">
+      <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--border-subtle)' }}>
+        <span className="font-bold text-sm tracking-wider uppercase" style={{ color: 'var(--accent-emerald)' }}>Batch 3 Test Bench</span>
+        <a href="/" className="text-xs px-3 py-1 rounded-lg border" style={{ borderColor: 'var(--border-subtle)' }}>Back to App</a>
+      </div>
+      <VeteranOwnedBadge />
+      <SocialScorecardGenerator />
+      <JuniorStudentPassModal />
+    </div>
+  );
+}
+if (window.location.pathname === '/hud') {
+    return <SmartGlassesHud clubs={clubs} />;
+  }
+
+if (window.location.pathname === '/cart-hud') {
+    return <OnCourseHoleHUD />;
+  }
 
   if (window.location.pathname === '/hud') {
     return <SmartGlassesHud clubs={clubs} />;
@@ -215,7 +279,8 @@ export default function App() {
     );
   }
 
-  const isPro = profile?.tier === 'tour_pro' || demoPro;
+  const studentPassActive = Boolean(studentPass?.verified) && Boolean(studentPass?.expiresAt) && new Date(studentPass.expiresAt) > new Date();
+  const isPro = profile?.tier === 'tour_pro' || demoPro || studentPassActive;
   const leadClub = clubs[1] || clubs[0];
 
   return (
@@ -312,13 +377,42 @@ export default function App() {
         )}
         {activeTab === 'prep' && <PrepWardrobe isPro={isPro} onOpenPaywall={(feat) => { setCheckoutError(''); setPaywallFeature(feat); }} />}
 
-        <div className="text-center pb-24 pt-2 flex items-center justify-center gap-4">
-          <a href="/hud" className="text-[11px] inline-flex items-center gap-1 opacity-70 hover:opacity-100">
-            <Glasses size={12} /> Glasses /HUD
-          </a>
-          <a href="/privacy-policy" className="text-[11px] inline-flex items-center gap-1 opacity-70 hover:opacity-100">
-            <ShieldCheck size={12} /> Solis Noir LLC • Privacy Policy
-          </a>
+        <div className="pt-3 pb-2 flex flex-wrap items-center justify-center gap-2">
+          <button
+            type="button"
+            onClick={() => setScorecardOpen(true)}
+            className="text-xs font-semibold px-3 py-1.5 rounded-xl border"
+            style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
+          >
+            Share Scorecard
+          </button>
+          <button
+            type="button"
+            onClick={() => setStudentPassOpen(true)}
+            className="text-xs font-semibold px-3 py-1.5 rounded-xl border"
+            style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
+          >
+            {studentPassActive ? 'Student Pass Active' : 'Junior / Student ($49.99)'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setTryOnOpen(true)}
+            className="text-xs font-semibold px-3 py-1.5 rounded-xl border"
+            style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
+          >
+            Try-On Studio
+          </button>
+        </div>
+        <div className="text-center pb-24 pt-1 flex flex-col items-center gap-2">
+          <div className="flex items-center justify-center gap-4">
+            <a href="/hud" className="text-[11px] inline-flex items-center gap-1 opacity-70 hover:opacity-100">
+              <Glasses size={12} /> Glasses /HUD
+            </a>
+            <a href="/privacy-policy" className="text-[11px] inline-flex items-center gap-1 opacity-70 hover:opacity-100">
+              <ShieldCheck size={12} /> Solis Noir LLC • Privacy Policy
+            </a>
+          </div>
+          <VeteranOwnedBadge compact />
         </div>
       </main>
 
@@ -332,6 +426,54 @@ export default function App() {
       )}
 
       {authOpen && <AuthModal onClose={() => setAuthOpen(false)} />}
+
+      {scorecardOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 overflow-y-auto">
+          <div
+            className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-3xl p-4 border space-y-3"
+            style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
+          >
+            <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--border-subtle)' }}>
+              <span className="text-xs font-extrabold uppercase tracking-wider text-emerald-400">
+                Post-Round Scorecard
+              </span>
+              <button type="button" onClick={() => setScorecardOpen(false)} className="p-1">
+                <X size={18} />
+              </button>
+            </div>
+            <SocialScorecardGenerator />
+          </div>
+        </div>
+      )}
+      {studentPassOpen && (
+        <JuniorStudentPassModal
+          onClose={() => setStudentPassOpen(false)}
+          onUnlockStudentPro={(passData) => {
+            setStudentPass({ verified: true, ...passData });
+            setUpgradeBanner(
+              `Junior/Student Tour Pro ($49.99/yr) unlocked! Share voucher ${passData.adultVoucherCode} for $10 off an Adult pass.`
+            );
+          }}
+        />
+      )}
+      {tryOnOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 overflow-y-auto">
+          <div
+            className="w-full max-w-md max-h-[92vh] overflow-y-auto rounded-3xl p-4 border space-y-3"
+            style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
+          >
+            <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--border-subtle)' }}>
+              <span className="text-xs font-extrabold uppercase tracking-wider text-emerald-400">
+                Virtual Try-On Studio
+              </span>
+              <button type="button" onClick={() => setTryOnOpen(false)} className="p-1" aria-label="Close try-on studio">
+                <X size={18} />
+              </button>
+            </div>
+            <VirtualTryOnStudio />
+          </div>
+        </div>
+      )}
 
       {wearableOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
