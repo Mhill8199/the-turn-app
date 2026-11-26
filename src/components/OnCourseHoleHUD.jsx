@@ -124,7 +124,7 @@ export default function OnCourseHoleHUD({
         <div className="p-5 rounded-3xl border-2 border-emerald-500 bg-emerald-950/30 space-y-2">
           <div className="text-xs uppercase tracking-widest text-amber-400">Recommended Club</div>
           <div className="text-4xl font-black text-white">{recommendedClub}</div>
-          <div className="text-sm text-emerald-300">{windNote}</div>
+          <div className="text-sm text-emerald-300 tabular-nums">{windNote}</div>
         </div>
 
         <button

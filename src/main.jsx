@@ -6,6 +6,9 @@ import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { LanguageProvider } from './i18n/LanguageContext';
 import { UnitProvider } from './utils/distanceUnits';
+import { installClientErrorLog } from './utils/clientErrorLog';
+
+installClientErrorLog();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

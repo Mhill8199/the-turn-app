@@ -116,7 +116,7 @@ export default function SocialScorecardGenerator({
         </div>
         <div className="text-right">
           <div className={`text-2xl font-black font-mono ${tabularNumsClass}`}>{sum(cardHoles, 'strokes')}</div>
-          <div className={`text-xs font-semibold ${tabularNumsClass}`} style={{ color: 'var(--accent-gold)' }}>{relToPar(cardHoles)}</div>
+          <div className={`text-xs font-semibold ${tabularNumsClass}`} style={{ color: 'var(--text-primary)' }}>{relToPar(cardHoles)}</div>
         </div>
       </div>
 
@@ -139,7 +139,7 @@ export default function SocialScorecardGenerator({
               <tr className="font-bold">
                 <td className="text-left py-1">Score</td>
                 {row.map((h) => (
-                  <td key={h.number} style={{ color: h.strokes < h.par ? 'var(--accent-emerald)' : h.strokes > h.par ? 'var(--accent-gold)' : 'inherit' }}>
+                  <td key={h.number} style={{ color: h.strokes < h.par ? 'var(--accent-emerald)' : h.strokes > h.par ? 'var(--text-primary)' : 'inherit' }}>
                     {h.strokes}
                   </td>
                 ))}
@@ -153,7 +153,7 @@ export default function SocialScorecardGenerator({
       <button
         type="button"
         onClick={shareCard}
-        className="w-full py-2.5 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-1.5"
+        className="w-full min-h-[44px] py-2.5 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-1.5"
         style={{ backgroundColor: 'var(--accent-emerald)' }}
       >
         {copied ? <><Check size={15} /> Caption Copied</> : <><Share2 size={15} /> Share Scorecard</>}

@@ -34,7 +34,7 @@ export default function AuthModal({ onClose }) {
     <div className="fixed inset-0 z-50 bg-black/65 flex items-end sm:items-center justify-center p-4">
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-md rounded-2xl p-5 border space-y-4"
+        className="w-full max-w-md rounded-3xl p-5 border space-y-4"
         style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
       >
         <div className="flex items-center justify-between">

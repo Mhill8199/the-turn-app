@@ -53,17 +53,17 @@ export default function OnboardingModal({ clubs, setClubs, onComplete, onClose }
   return (
     <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
       <div
-        className="w-full max-w-md rounded-2xl p-5 border space-y-4"
+        className="w-full max-w-md rounded-3xl p-5 border space-y-4"
         style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
       >
         <div className="flex items-center justify-between">
-          <div className="text-xs font-mono font-semibold uppercase tracking-wider" style={{ color: 'var(--accent-gold)' }}>
+          <div className="text-xs font-mono font-semibold uppercase tracking-wider tabular-nums" style={{ color: 'var(--text-secondary)' }}>
             First-Launch Setup • Step {step} of 3
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-1 opacity-70 hover:opacity-100"
+            className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center opacity-70 hover:opacity-100"
             aria-label="Skip Onboarding"
           >
             <X size={18} />
@@ -142,7 +142,7 @@ export default function OnboardingModal({ clubs, setClubs, onComplete, onClose }
                     <div className="text-sm font-semibold">{course.name}</div>
                     <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>{course.city}</div>
                   </div>
-                  <span className="text-xs font-mono" style={{ color: 'var(--accent-gold)' }}>{course.elevationFt} ft</span>
+                  <span className="text-xs font-mono tabular-nums" style={{ color: 'var(--text-secondary)' }}>{course.elevationFt} ft</span>
                 </button>
               ))}
             </div>

@@ -413,12 +413,12 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
     <div className="space-y-4 pb-24">
       {/* Live Scorecard Stats Banner (Total Strokes, GIR%, FIR%, Putts) */}
       {liveStats && (
-        <div className="rounded-2xl p-3.5 border space-y-2" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-emerald)' }}>
+        <div className="rounded-3xl p-3.5 border space-y-2" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-emerald)' }}>
           <div className="flex items-center justify-between text-xs">
             <span className="font-semibold uppercase tracking-wider" style={{ color: 'var(--accent-emerald)' }}>
               Your Live Round Stats ({liveStats.holesCount} Holes Logged)
             </span>
-            <span className="font-mono text-[11px]" style={{ color: 'var(--accent-gold)' }}>
+            <span className="font-mono text-[11px]" style={{ color: 'var(--text-secondary)' }}>
               Synced to Recap
             </span>
           </div>
@@ -444,7 +444,7 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
       )}
 
       {/* Foursome Crew Pass (4-Seat Manager & Buddy Redemption) */}
-      <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-gold)' }}>
+      <div className="rounded-3xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-gold)' }}>
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--accent-gold)' }}>
             <Crown size={14} /> Foursome Crew Pass (4 Seats)
@@ -466,7 +466,7 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
               <div className="flex gap-1.5">
                 <a
                   href={`sms:?&body=${crewSmsBody}`}
-                  className="px-3 py-2 rounded-xl text-xs font-semibold text-white flex items-center gap-1"
+                  className="min-h-[44px] px-3 py-2 rounded-xl text-xs font-semibold text-white flex items-center gap-1"
                   style={{ backgroundColor: 'var(--accent-emerald)' }}
                 >
                   <Send size={12} /> Text 3 Buddies
@@ -515,7 +515,7 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
                 <button
                   type="button"
                   onClick={handleCreateDemoPass}
-                  className="flex-1 py-2 rounded-xl text-xs font-semibold text-white"
+                  className="flex-1 min-h-[44px] py-2 rounded-xl text-xs font-semibold text-white"
                   style={{ backgroundColor: 'var(--accent-emerald)' }}
                 >
                   Generate My 4-Seat Crew Code
@@ -524,7 +524,7 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
                 <button
                   type="button"
                   onClick={() => onOpenPaywall?.('Foursome Crew Pass (4 Tour Pro Seats - $299.99/yr)')}
-                  className="flex-1 py-2 rounded-xl text-xs font-semibold text-white"
+                  className="flex-1 min-h-[44px] py-2 rounded-xl text-xs font-semibold text-white"
                   style={{ backgroundColor: 'var(--accent-emerald)' }}
                 >
                   Get Foursome Crew Pass ($299.99/yr)
@@ -546,7 +546,7 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
               </div>
               <button
                 type="submit"
-                className="px-3 py-1.5 rounded-xl text-xs font-semibold border"
+                className="min-h-[44px] px-3 py-1.5 rounded-xl text-xs font-semibold border"
                 style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--accent-gold)', color: 'var(--accent-gold)' }}
               >
                 Claim Seat
@@ -558,9 +558,9 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
       </div>
 
       {/* Active Foursome Tee Time & Invite */}
-      <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
+      <div className="rounded-3xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
         <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--accent-gold)' }}>
+          <span className="text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--text-secondary)' }}>
             <Cloud size={13} /> {syncStatus}
           </span>
           <span className="text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>
@@ -613,7 +613,7 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
         </div>
       </div>
 
-      <form onSubmit={handleBuddyJoin} className="rounded-2xl p-3.5 border space-y-2" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
+      <form onSubmit={handleBuddyJoin} className="rounded-3xl p-3.5 border space-y-2" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
         <div className="text-[11px] font-semibold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--accent-emerald)' }}>
           <UserPlus size={13} /> Quick RSVP, HCP & Outfit Lock
         </div>
@@ -652,7 +652,7 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
         </div>
       </form>
 
-      <div className="rounded-2xl p-4 border space-y-2.5" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
+      <div className="rounded-3xl p-4 border space-y-2.5" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-sm flex items-center gap-1.5">
             <Shirt size={15} style={{ color: 'var(--accent-emerald)' }} /> Lineup, HCP & Outfit Check
@@ -661,9 +661,11 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
         </div>
 
         {players.length === 0 && (
-          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-            No players in this foursome yet. Use the form above to add someone.
-          </p>
+          <div className="rounded-3xl border px-3 py-3" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+              No players in this foursome yet. Use the form above to add someone.
+            </p>
+          </div>
         )}
 
         {players.map((p) => {
@@ -681,7 +683,7 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
                   <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border" style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-secondary)' }}>
                     {p.tee} Tees
                   </span>
-                  <label className="text-[10px] font-mono flex items-center gap-1" style={{ color: 'var(--accent-gold)' }}>
+                  <label className="text-[10px] font-mono flex items-center gap-1 tabular-nums" style={{ color: 'var(--text-secondary)' }}>
                     HCP
                     <input
                       type="number"
@@ -716,10 +718,10 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
         })}
       </div>
 
-      <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
+      <div className="rounded-3xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-sm flex items-center gap-1.5">
-            <Trophy size={15} style={{ color: 'var(--accent-gold)' }} /> Skins & 19th-Hole Settlement
+            <Trophy size={15} style={{ color: 'var(--text-secondary)' }} /> Skins & 19th-Hole Settlement
           </h3>
           <div className="flex items-center gap-2 text-xs">
             <span style={{ color: 'var(--text-secondary)' }}>$/Skin:</span>
@@ -761,7 +763,7 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
               <div key={p.id} className="flex items-center justify-between text-xs p-2.5 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
                 <div>
                   <div className="font-semibold">{p.name} <span className="font-mono text-[10px] opacity-75">(Net {netScore})</span></div>
-                  <div className="text-[10px] font-mono" style={{ color: 'var(--text-secondary)' }}>
+                  <div className="text-[10px] font-mono tabular-nums" style={{ color: 'var(--text-secondary)' }}>
                     Skins: {skinNet >= 0 ? `+$${skinNet}` : `-$${Math.abs(skinNet)}`} - Tab: -${perPlayerTab}
                   </div>
                 </div>
@@ -769,7 +771,7 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
                   <button onClick={() => adjustSkins(p.id, -1)} className="w-6 h-6 rounded border font-bold" style={{ borderColor: 'var(--border-subtle)' }}>-</button>
                   <span className="font-mono w-10 text-center tabular-nums">{p.skins} sk</span>
                   <button onClick={() => adjustSkins(p.id, 1)} className="w-6 h-6 rounded border font-bold" style={{ borderColor: 'var(--border-subtle)' }}>+</button>
-                  <span className={`font-mono font-bold w-13 text-right ${totalSettlement >= 0 ? 'text-emerald-500' : 'text-red-400'}`}>
+                  <span className="font-mono font-bold w-13 text-right tabular-nums" style={{ color: totalSettlement >= 0 ? 'var(--accent-emerald)' : '#B91C1C' }}>
                     {totalSettlement >= 0 ? `+$${totalSettlement}` : `-$${Math.abs(totalSettlement)}`}
                   </span>
                 </div>
@@ -779,7 +781,7 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
         </div>
       </div>
 
-      <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-emerald)' }}>
+      <div className="rounded-3xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-emerald)' }}>
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--accent-emerald)' }}>
             <Award size={15} /> Post-Round Recap Card
@@ -792,7 +794,7 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
         <button
           type="button"
           onClick={shareRecapCard}
-          className="w-full py-2.5 rounded-xl font-semibold text-xs text-white flex items-center justify-center gap-1.5"
+          className="w-full min-h-[44px] py-2.5 rounded-xl font-semibold text-xs text-white flex items-center justify-center gap-1.5"
           style={{ backgroundColor: 'var(--accent-emerald)' }}
         >
           {recapCopied ? <><Check size={14} /> Recap Copied to Clipboard</> : <><Share2 size={14} /> Copy Round Recap for Group Chat</>}

@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { COURSE_PRESETS } from '../lib/weatherPhysics';
+import { supabase } from '../lib/supabase';
 import { formatDistance as formatYardsDistance, useUnits } from '../utils/distanceUnits';
 
 /** ESRI World Imagery. Request this z/y/x order; never request z above 19. */
@@ -184,9 +185,8 @@ function supabaseConfigured() {
 }
 
 async function readRemoteGeometry(key) {
-  if (!supabaseConfigured()) return null;
+  if (!supabaseConfigured() || !supabase) return null;
   try {
-    const { supabase } = await import('../lib/supabase');
     const { data, error } = await supabase
       .from('course_geometries')
       .select('features, geometry')
@@ -201,9 +201,8 @@ async function readRemoteGeometry(key) {
 }
 
 async function upsertRemoteGeometry(record) {
-  if (!supabaseConfigured()) return;
+  if (!supabaseConfigured() || !supabase) return;
   try {
-    const { supabase } = await import('../lib/supabase');
     const row = {
       cache_key: record.key,
       course_name: record.courseName || '',
@@ -736,7 +735,7 @@ export default function SatelliteHoleMap({
         >
           <button
             type="button"
-            className="w-9 h-9 text-lg font-semibold leading-none"
+            className="min-h-[44px] min-w-[44px] text-lg font-semibold leading-none"
             aria-label="Zoom in"
             onClick={() => setZoom((z) => clampZoom(z + 1))}
           >
@@ -747,7 +746,7 @@ export default function SatelliteHoleMap({
           </div>
           <button
             type="button"
-            className="w-9 h-9 text-lg font-semibold leading-none"
+            className="min-h-[44px] min-w-[44px] text-lg font-semibold leading-none"
             aria-label="Zoom out"
             onClick={() => setZoom((z) => clampZoom(z - 1))}
           >
@@ -780,7 +779,7 @@ export default function SatelliteHoleMap({
         <button
           type="button"
           onClick={useMyGps}
-          className="shrink-0 px-3 py-2 rounded-xl text-[11px] font-semibold border"
+          className="shrink-0 min-h-[44px] px-3 py-2 rounded-xl text-[11px] font-semibold border"
           style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
         >
           Use my GPS

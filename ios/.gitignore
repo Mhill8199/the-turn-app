@@ -11,3 +11,9 @@ capacitor-cordova-ios-plugins
 # Generated Config files
 App/App/capacitor.config.json
 App/App/config.xml
+
+# Signing and push credentials — do not commit
+GoogleService-Info.plist
+*.p12
+*.mobileprovision
+*.cer

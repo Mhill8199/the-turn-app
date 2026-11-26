@@ -138,7 +138,7 @@ export default function VirtualTryOnStudio() {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wider inline-flex items-center gap-1" style={{ color: 'var(--accent-gold)' }}>
+        <span className="text-[10px] font-semibold uppercase tracking-wider inline-flex items-center gap-1" style={{ color: 'var(--text-secondary)' }}>
           <Lock size={12} /> On-device vault
         </span>
         <button
@@ -151,9 +151,11 @@ export default function VirtualTryOnStudio() {
         </button>
       </div>
       {!baseline && (
-        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-          No baseline photo in the vault yet. Add one to try clothes on your photo.
-        </p>
+        <div className="rounded-3xl border px-3 py-3" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
+          <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+            No baseline photo in the vault yet. Add one to try clothes on your photo.
+          </p>
+        </div>
       )}
 
       <div
@@ -256,7 +258,7 @@ export default function VirtualTryOnStudio() {
                 <div className="mt-1 flex flex-wrap gap-1">
                   <span className="text-[10px] px-1.5 py-0.5 rounded-full border" style={{ borderColor: 'var(--border-subtle)' }}>{item.categoryTag}</span>
                   {item.courseToStreet && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: 'var(--accent-gold)', color: '#111412' }}>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: 'var(--accent-emerald-fill)', color: '#0B0D0C' }}>
                       Course-to-Street
                     </span>
                   )}

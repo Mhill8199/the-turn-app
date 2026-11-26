@@ -78,7 +78,7 @@ export default function BaselinePhotoVaultModal({ onClose, onPhotoSaved }) {
 
         <div
           className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full"
-          style={{ backgroundColor: 'var(--bg-elevated)', color: 'var(--accent-gold)' }}
+          style={{ backgroundColor: 'var(--bg-elevated)', color: 'var(--text-secondary)' }}
         >
           <Lock size={12} /> 100% On-Device AES-256 Encrypted • Never Uploaded to Cloud
         </div>

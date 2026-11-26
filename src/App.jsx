@@ -2,7 +2,6 @@
 import JuniorStudentPassModal from './components/JuniorStudentPassModal';
 import OnCourseHoleHUD from './components/OnCourseHoleHUD';
 import VeteranOwnedBadge from './components/VeteranOwnedBadge';
-import VirtualTryOnStudio from './components/VirtualTryOnStudio';
 import { Sun, Moon, Shirt, Compass, Briefcase, Users, Crown, LogIn, LogOut, Watch, Glasses, X, ShieldCheck, Check, Loader2, KeyRound, Copy, Sliders } from 'lucide-react';
 import { useTheme } from './context/ThemeContext';
 import { useAuth } from './context/AuthContext';
@@ -108,7 +107,6 @@ export default function App() {
   });
   const [scorecardOpen, setScorecardOpen] = useState(false);
   const [studentPassOpen, setStudentPassOpen] = useState(false);
-  const [tryOnOpen, setTryOnOpen] = useState(false);
   const [studentPass, setStudentPass] = useState(() => {
     try {
       const saved = localStorage.getItem('the-turn-student-pass');
@@ -247,7 +245,7 @@ const handleStartCheckout = async () => {
         <div className="space-y-3 text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
           <p><strong style={{ color: 'var(--text-primary)' }}>1. Operator:</strong> Solis Noir LLC operates The Turn.</p>
           <p><strong style={{ color: 'var(--text-primary)' }}>2. On-device photos:</strong> Photos in the try-on vault are encrypted with AES-256 (AES-GCM) on this device and are not uploaded.</p>
-          <p><strong style={{ color: 'var(--text-primary)' }}>3. Supabase telemetry:</strong> Supabase stores your account email, profile, bag, scores, and beta feedback when you submit it. Optional GPS is used only to fetch local course weather, dew point, wind, and elevation. Records use Row-Level Security.</p>
+          <p><strong style={{ color: 'var(--text-primary)' }}>3. Supabase storage:</strong> Supabase stores your account email, profile, bag, scores, and beta feedback when you submit it. Optional GPS is used only to fetch local course weather, dew point, wind, and elevation. Records use Row-Level Security.</p>
           <p><strong style={{ color: 'var(--text-primary)' }}>4. Wearables & SMS:</strong> Optional Apple Watch, Garmin, and Meta smart glasses integrations read stock yardages and active hole notes on demand. Foursome SMS links start from your device.</p>
           <p><strong style={{ color: 'var(--text-primary)' }}>5. Deletion rights:</strong> Wipe Local Vault & Cache clears this device. Delete My Account & All Data calls delete_own_account, then wipes local data and signs you out. You can also contact Solis Noir LLC to request deletion.</p>
         </div>
@@ -373,26 +371,10 @@ const handleStartCheckout = async () => {
           <button
             type="button"
             onClick={() => setScorecardOpen(true)}
-            className="text-xs font-semibold px-3 py-1.5 rounded-xl border"
+            className="min-h-[44px] text-xs font-semibold px-3 py-1.5 rounded-xl border"
             style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
           >
             {t('scorecard')}
-          </button>
-          <button
-            type="button"
-            onClick={() => setStudentPassOpen(true)}
-            className="text-xs font-semibold px-3 py-1.5 rounded-xl border"
-            style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
-          >
-            {studentPassActive ? t('studentPass') : 'Junior / Student ($49.99)'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setTryOnOpen(true)}
-            className="text-xs font-semibold px-3 py-1.5 rounded-xl border"
-            style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
-          >
-            {t('tryOn')}
           </button>
         </div>
         <div className="text-center pb-24 pt-1 flex flex-col items-center gap-2">
@@ -448,30 +430,11 @@ const handleStartCheckout = async () => {
           }}
         />
       )}
-      {tryOnOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 overflow-y-auto">
-          <div
-            className="w-full max-w-md max-h-[92vh] overflow-y-auto rounded-3xl p-4 border space-y-3"
-            style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
-          >
-            <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--border-subtle)' }}>
-              <span className="text-xs font-extrabold uppercase tracking-wider text-emerald-400">
-                Virtual Try-On Studio
-              </span>
-              <button type="button" onClick={() => setTryOnOpen(false)} className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-1" aria-label="Close try-on studio">
-                <X size={18} />
-              </button>
-            </div>
-            <VirtualTryOnStudio />
-          </div>
-        </div>
-      )}
-
       {wearableOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
           <div className="w-full max-w-md rounded-3xl p-5 border space-y-4" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
             <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent-gold)' }}>
+              <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent-emerald)' }}>
                 Wearable Caddie Preview
               </span>
               <button type="button" onClick={() => setWearableOpen(false)} className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center" aria-label="Close wearable preview"><X size={18} /></button>
@@ -487,7 +450,7 @@ const handleStartCheckout = async () => {
             </div>
 
             <div className="p-4 rounded-2xl border space-y-1.5" style={{ backgroundColor: '#0B0D0C', borderColor: '#2B352F', color: '#F3F4F1' }}>
-              <div className="flex items-center justify-between text-[11px] text-amber-400 font-mono">
+              <div className="flex items-center justify-between text-[11px] text-emerald-400 font-mono">
                 <span className="flex items-center gap-1"><Glasses size={13} /> META RAY-BAN • VOICE & HUD</span>
                 <a href="/hud" className="underline">OPEN /HUD</a>
               </div>
@@ -501,7 +464,7 @@ const handleStartCheckout = async () => {
               <div className="flex items-center justify-between gap-2">
                 <div className="text-xs">
                   <div className="font-semibold flex items-center gap-1.5">
-                    <KeyRound size={13} style={{ color: 'var(--accent-gold)' }} /> Personal Bag Auth Header
+                    <KeyRound size={13} style={{ color: 'var(--accent-emerald)' }} /> Personal Bag Auth Header
                   </div>
                   <div className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>
                     {user ? `Signed in as ${user.email}` : 'Sign in to copy your personal Bearer token'}
@@ -517,7 +480,7 @@ const handleStartCheckout = async () => {
                 </button>
               </div>
               {tokenStatus && (
-                <div className="text-[11px]" style={{ color: 'var(--accent-gold)' }}>
+                <div className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>
                   {tokenStatus}
                 </div>
               )}
@@ -644,7 +607,7 @@ const handleStartCheckout = async () => {
               <button
                 type="button"
                 onClick={() => setPaywallFeature(null)}
-                className="px-4 py-3 rounded-xl border text-sm"
+                className="min-h-[44px] px-4 py-3 rounded-xl border text-sm"
                 style={{ borderColor: 'var(--border-subtle)' }}
               >
                 Close

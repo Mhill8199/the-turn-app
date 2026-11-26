@@ -154,7 +154,7 @@ export default function PrepWardrobe({ isPro = false, onOpenPaywall }) {
           <h2 className="text-lg font-semibold">Wardrobe & Layering</h2>
           <button
             onClick={() => setAddModalOpen(true)}
-            className="text-xs px-2.5 py-1.5 rounded-lg border font-medium flex items-center gap-1"
+            className="min-h-[44px] text-xs px-2.5 py-1.5 rounded-lg border font-medium flex items-center gap-1"
             style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
           >
             <Plus size={13} /> Add Piece
@@ -210,7 +210,7 @@ export default function PrepWardrobe({ isPro = false, onOpenPaywall }) {
               <button
                 key={w}
                 onClick={() => { setWeather(w); setLockedIn(false); }}
-                className={`px-3 py-1 rounded-full text-xs capitalize border ${
+                className={`min-h-[44px] px-3 py-1 rounded-full text-xs capitalize border ${
                   weather === w ? 'bg-emerald-700 text-white border-emerald-700' : ''
                 }`}
                 style={weather !== w ? { borderColor: 'var(--border-subtle)' } : {}}
@@ -228,7 +228,7 @@ export default function PrepWardrobe({ isPro = false, onOpenPaywall }) {
               <button
                 key={v}
                 onClick={() => { setVibe(v); setLockedIn(false); }}
-                className={`px-3 py-1 rounded-full text-xs capitalize border ${
+                className={`min-h-[44px] px-3 py-1 rounded-full text-xs capitalize border ${
                   vibe === v ? 'bg-emerald-700 text-white border-emerald-700' : ''
                 }`}
                 style={vibe !== v ? { borderColor: 'var(--border-subtle)' } : {}}
@@ -248,9 +248,11 @@ export default function PrepWardrobe({ isPro = false, onOpenPaywall }) {
 
         <div className="space-y-2.5">
           {closet.length === 0 && (
-            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-              Your closet is empty. Add a piece to build a lineup.
-            </p>
+            <div className="rounded-3xl border px-3 py-3" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
+              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                Your closet is empty. Add a piece to build a lineup.
+              </p>
+            </div>
           )}
           {closet.length > 0 && activeOutfit.length === 0 && (
             <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>

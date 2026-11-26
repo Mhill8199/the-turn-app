@@ -156,7 +156,7 @@ export default function StockBag({ clubs, setClubs }) {
 
   return (
     <div className="space-y-4 pb-24">
-      <div className="rounded-2xl p-4 border flex items-center justify-between" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
+      <div className="rounded-3xl p-4 border flex items-center justify-between" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
         <div>
           <span className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
             Personal Stock Bag • {clubs.length}/14 Clubs
@@ -165,15 +165,15 @@ export default function StockBag({ clubs, setClubs }) {
             <Briefcase size={18} style={{ color: 'var(--accent-emerald)' }} /> Custom Carry & Rollout
           </h2>
         </div>
-        <span className="text-xs font-mono px-2.5 py-1 rounded-full" style={{ backgroundColor: 'var(--bg-elevated)', color: 'var(--accent-gold)' }}>
+        <span className="text-xs font-mono px-2.5 py-1 rounded-full" style={{ backgroundColor: 'var(--bg-elevated)', color: 'var(--text-secondary)' }}>
           {user ? 'Cloud Synced' : 'Local Bag'}
         </span>
       </div>
 
       {/* Yardage Gap & Dead-Zone Detector */}
-      <div className="rounded-2xl p-4 border space-y-2.5" style={{ backgroundColor: 'var(--bg-surface)', borderColor: gapAlerts.length > 0 ? 'var(--accent-gold)' : 'var(--accent-emerald)' }}>
+      <div className="rounded-3xl p-4 border space-y-2.5" style={{ backgroundColor: 'var(--bg-surface)', borderColor: gapAlerts.length > 0 ? 'var(--border-subtle)' : 'var(--accent-emerald)' }}>
         <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5" style={{ color: gapAlerts.length > 0 ? 'var(--accent-gold)' : 'var(--accent-emerald)' }}>
+          <span className="text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5" style={{ color: gapAlerts.length > 0 ? 'var(--text-primary)' : 'var(--accent-emerald)' }}>
             <Layers size={14} /> Yardage Gap & Dead-Zone Detector
           </span>
           <span className="text-[11px] font-mono" style={{ color: 'var(--text-secondary)' }}>
@@ -193,7 +193,7 @@ export default function StockBag({ clubs, setClubs }) {
                 className="p-2.5 rounded-xl border text-xs space-y-0.5"
                 style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
               >
-                <div className="font-semibold flex items-center gap-1.5" style={{ color: g.type === 'deadzone' ? 'var(--accent-gold)' : '#F87171' }}>
+                <div className="font-semibold flex items-center gap-1.5 tabular-nums" style={{ color: g.type === 'deadzone' ? 'var(--text-primary)' : '#B91C1C' }}>
                   <AlertTriangle size={13} /> {g.pair} ({formatDistance(g.diff)} gap)
                 </div>
                 <div className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>{g.advice}</div>
@@ -204,7 +204,7 @@ export default function StockBag({ clubs, setClubs }) {
       </div>
 
       {/* Wedge Bounce & Turf-Firmness Advisor */}
-      <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
+      <div className="rounded-3xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--accent-emerald)' }}>
             <Compass size={14} /> Wedge Bounce & Turf Advisor
@@ -240,7 +240,7 @@ export default function StockBag({ clubs, setClubs }) {
               <Sparkles size={13} style={{ color: 'var(--accent-emerald)' }} />
               <strong>Primary Greenside Wedge:</strong> {leadWedge.club_type} ({leadWedge.bounce_grind})
             </span>
-            <span className={`font-mono text-[11px] ${tabularNumsClass}`} style={{ color: '#10B981' }}>
+            <span className={`font-mono text-[11px] ${tabularNumsClass}`} style={{ color: 'var(--accent-emerald)' }}>
               {formatDistance(leadWedge.carry_yards)} carry
             </span>
           </div>
@@ -266,8 +266,8 @@ export default function StockBag({ clubs, setClubs }) {
                 <span
                   className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded"
                   style={{
-                    backgroundColor: w.fitScore >= 85 ? 'rgba(16,185,129,0.18)' : 'rgba(234,179,8,0.16)',
-                    color: w.fitScore >= 85 ? '#10B981' : '#EAB308',
+                    backgroundColor: w.fitScore >= 85 ? 'rgba(16,185,129,0.18)' : 'var(--bg-surface)',
+                    color: w.fitScore >= 85 ? 'var(--accent-emerald)' : 'var(--text-primary)',
                   }}
                 >
                   {w.fitScore >= 85 ? 'Ideal' : w.fitScore >= 65 ? 'Playable' : 'Dig/Skid Risk'}
@@ -279,7 +279,7 @@ export default function StockBag({ clubs, setClubs }) {
       </div>
 
       {/* Add Custom Club Form */}
-      <form onSubmit={addClub} className="rounded-2xl p-3.5 border space-y-2.5" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
+      <form onSubmit={addClub} className="rounded-3xl p-3.5 border space-y-2.5" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
         <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
           Add Club or Wedge to Bag
         </div>
@@ -333,7 +333,7 @@ export default function StockBag({ clubs, setClubs }) {
           return (
             <div
               key={club.id}
-              className="rounded-2xl p-3.5 border space-y-2.5"
+              className="rounded-3xl p-3.5 border space-y-2.5"
               style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
             >
               <div className="flex items-center justify-between">

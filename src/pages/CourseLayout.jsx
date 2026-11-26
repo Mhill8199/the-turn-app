@@ -734,7 +734,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
 
   return (
     <div className="space-y-4 pb-24">
-      <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
+      <div className="rounded-3xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
         <button
           type="button"
           onClick={() => {
@@ -762,7 +762,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
           <button
             type="submit"
             disabled={searchingCourses}
-            className="px-2.5 py-1.5 rounded-xl text-xs font-semibold border shrink-0"
+            className="min-h-[44px] px-2.5 py-1.5 rounded-xl text-xs font-semibold border shrink-0"
             style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
           >
             {searchingCourses ? <Loader2 size={13} className="animate-spin" /> : 'Find'}
@@ -772,7 +772,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
             type="button"
             onClick={handleUseGps}
             disabled={gpsLoading}
-            className="px-2.5 py-1.5 rounded-xl text-xs font-semibold text-white flex items-center gap-1 shrink-0"
+            className="min-h-[44px] px-2.5 py-1.5 rounded-xl text-xs font-semibold text-white flex items-center gap-1 shrink-0"
             style={{ backgroundColor: 'var(--accent-emerald)' }}
           >
             <Navigation size={13} /> {gpsLoading ? '...' : 'GPS'}
@@ -781,7 +781,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
           <button
             type="button"
             onClick={() => setCreatorOpen(!creatorOpen)}
-            className="px-2.5 py-1.5 rounded-xl text-xs font-semibold border flex items-center gap-1 shrink-0"
+            className="min-h-[44px] min-w-[44px] px-2.5 py-1.5 rounded-xl text-xs font-semibold border flex items-center justify-center gap-1 shrink-0"
             style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
           >
             {creatorOpen ? <X size={13} /> : <Plus size={13} />}
@@ -804,8 +804,8 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
           <button
             type="button"
             onClick={() => setSimOpen(!simOpen)}
-            className="text-[11px] font-mono px-2.5 py-1.5 rounded-xl border flex items-center gap-1"
-            style={{ borderColor: 'var(--border-subtle)', color: weather.isLive ? 'var(--accent-emerald)' : 'var(--accent-gold)' }}
+            className="min-h-[44px] text-[11px] font-mono px-2.5 py-1.5 rounded-xl border flex items-center gap-1"
+            style={{ borderColor: 'var(--border-subtle)', color: weather.isLive ? 'var(--accent-emerald)' : 'var(--text-secondary)' }}
           >
             <SlidersHorizontal size={11} /> {weather.isLive ? 'LIVE WX' : 'WHAT-IF'}
           </button>
@@ -819,7 +819,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
                 key={t.id}
                 type="button"
                 onClick={() => setTeeId(t.id)}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition ${
+                className={`min-h-[44px] px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition ${
                   teeId === t.id ? 'bg-emerald-700 text-white border-emerald-700' : ''
                 }`}
                 style={teeId !== t.id ? { borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' } : {}}
@@ -831,7 +831,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         </div>
 
         {gpsStatus && (
-          <div className="text-[11px] font-mono" style={{ color: 'var(--accent-gold)' }}>
+          <div className="text-[11px] font-mono tabular-nums" style={{ color: 'var(--accent-emerald)' }}>
             {gpsStatus}
           </div>
         )}
@@ -841,7 +841,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
             <button
               key={`${activeCourse.id}-${h.number}-${idx}`}
               onClick={() => setHoleIdx(idx)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-mono font-semibold border shrink-0 transition tabular-nums ${
+              className={`min-h-[44px] px-3 py-1.5 rounded-xl text-xs font-mono font-semibold border shrink-0 transition tabular-nums ${
                 holeIdx === idx ? 'bg-emerald-700 text-white border-emerald-700' : ''
               }`}
               style={holeIdx !== idx ? { borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' } : {}}
@@ -853,7 +853,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
       </div>
 
       {simOpen && (
-        <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-emerald)' }}>
+        <div className="rounded-3xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-emerald)' }}>
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent-emerald)' }}>
               Weather & Dew Point What-If Simulator
@@ -862,14 +862,14 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               type="button"
               onClick={reloadLiveWeather}
               className="text-[11px] underline font-semibold"
-              style={{ color: 'var(--accent-gold)' }}
+              style={{ color: 'var(--accent-emerald)' }}
             >
               Reset to Live WX
             </button>
           </div>
           <div className="grid grid-cols-3 gap-2 text-xs">
             <div>
-              <label className="text-[10px] block mb-0.5" style={{ color: 'var(--text-secondary)' }}>Temp ({weather.tempF}F)</label>
+              <label className="text-[10px] block mb-0.5 tabular-nums" style={{ color: 'var(--text-secondary)' }}>Temp ({weather.tempF}F)</label>
               <input
                 type="range"
                 min="40"
@@ -880,7 +880,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               />
             </div>
             <div>
-              <label className="text-[10px] block mb-0.5" style={{ color: 'var(--text-secondary)' }}>Dew Pt ({weather.dewPointF}F)</label>
+              <label className="text-[10px] block mb-0.5 tabular-nums" style={{ color: 'var(--text-secondary)' }}>Dew Pt ({weather.dewPointF}F)</label>
               <input
                 type="range"
                 min="30"
@@ -908,25 +908,25 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
       {creatorOpen && (
         <form
           onSubmit={creatorMode === 'hole' ? handleSaveHole : handleCreateCourse}
-          className="rounded-2xl p-4 border space-y-3"
-          style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-gold)' }}
+          className="rounded-3xl p-4 border space-y-3"
+          style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent-gold)' }}>
+            <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-primary)' }}>
               Custom Course & Hole Builder
             </span>
             <div className="flex gap-1 rounded-lg p-0.5 border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
               <button
                 type="button"
                 onClick={() => setCreatorMode('hole')}
-                className={`px-2.5 py-1 rounded text-[11px] font-semibold ${creatorMode === 'hole' ? 'bg-emerald-700 text-white' : ''}`}
+                className={`min-h-[44px] px-2.5 py-1 rounded text-[11px] font-semibold ${creatorMode === 'hole' ? 'bg-emerald-700 text-white' : ''}`}
               >
                 + Hole to {activeCourse.name.split(' ')[0]}
               </button>
               <button
                 type="button"
                 onClick={() => setCreatorMode('course')}
-                className={`px-2.5 py-1 rounded text-[11px] font-semibold ${creatorMode === 'course' ? 'bg-emerald-700 text-white' : ''}`}
+                className={`min-h-[44px] px-2.5 py-1 rounded text-[11px] font-semibold ${creatorMode === 'course' ? 'bg-emerald-700 text-white' : ''}`}
               >
                 + New Course
               </button>
@@ -1107,7 +1107,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         </div>
 
         <div className="rounded-xl p-2.5 border text-center" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
-          <Wind size={14} className="mx-auto mb-1" style={{ color: 'var(--accent-gold)' }} />
+          <Wind size={14} className="mx-auto mb-1" style={{ color: 'var(--accent-emerald-fill)' }} />
           <div className="font-mono font-bold text-sm tabular-nums">{formatSpeed(weather.windSpeedMph)}</div>
           <div className="text-[10px] tabular-nums" style={{ color: 'var(--text-secondary)' }}>{degreesToCompass(weather.windDirDeg)} (G {formatSpeed(weather.windGustMph)})</div>
         </div>
@@ -1122,7 +1122,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
       {bestClub && (
         <div
           onClick={() => setSelectedClubId(bestClub.id)}
-          className="rounded-2xl p-3.5 border cursor-pointer flex items-center justify-between"
+          className="rounded-3xl p-3.5 border cursor-pointer flex items-center justify-between"
           style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-emerald)' }}
         >
           <div className="space-y-0.5">
@@ -1142,7 +1142,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
 
       {/* Toggleable Live Satellite Tile + Aerial Hole Shot Map */}
       {activeClub && (
-        <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
+        <div className="rounded-3xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
           <div className="flex items-center justify-between gap-2 text-xs">
             <span className="font-semibold truncate tabular-nums">
               Hole #{activeHole.number} - Par {activeHole.par} - {formatDistance(activeHole.yards)}
@@ -1151,7 +1151,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               <button
                 type="button"
                 onClick={() => setUseSatTiles(!useSatTiles)}
-                className="px-2 py-0.5 rounded-lg border font-mono text-[10px] font-semibold flex items-center gap-1"
+                className="min-h-[44px] px-2.5 rounded-lg border font-mono text-[10px] font-semibold flex items-center gap-1"
                 style={{
                   borderColor: showRealSat ? 'var(--accent-emerald)' : 'var(--border-subtle)',
                   color: showRealSat ? 'var(--accent-emerald)' : 'var(--text-secondary)',
@@ -1167,7 +1167,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
                       key={z}
                       type="button"
                       onClick={() => setSatZoom(z)}
-                      className={`px-1.5 py-0.5 font-mono text-[10px] font-semibold ${
+                      className={`min-h-[44px] min-w-[44px] font-mono text-[10px] font-semibold ${
                         satZoom === z ? 'bg-emerald-700 text-white' : ''
                       }`}
                       style={satZoom !== z ? { backgroundColor: 'var(--bg-elevated)', color: 'var(--text-secondary)' } : {}}
@@ -1177,7 +1177,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
                   ))}
                 </div>
               )}
-              <span className="font-mono" style={{ color: 'var(--accent-gold)' }}>
+              <span className="font-mono tabular-nums" style={{ color: 'var(--accent-emerald)' }}>
                 {activeClub.headwindMph >= 0 ? `${formatSpeed(activeClub.headwindMph)} Into` : `${formatSpeed(Math.abs(activeClub.headwindMph))} Helping`}
               </span>
             </div>
@@ -1193,7 +1193,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
                   key={pt.id}
                   type="button"
                   onClick={() => setActivePinType(pt.id)}
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
+                  className={`min-h-[44px] px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
                     activePinType === pt.id ? 'border-white' : 'opacity-70'
                   }`}
                   style={{ backgroundColor: `${pt.color}25`, color: pt.color, borderColor: activePinType === pt.id ? pt.color : 'transparent' }}
@@ -1478,10 +1478,10 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
             <g transform="translate(34, 34)">
               <circle cx="0" cy="0" r="18" fill="#060D09" fillOpacity="0.86" stroke="#6EE7B7" strokeOpacity="0.65" strokeWidth="1" />
               <g transform={`rotate(${weather.windDirDeg})`}>
-                <line x1="0" y1="10" x2="0" y2="-10" stroke="#FBBF24" strokeWidth="2.2" />
-                <polygon points="0,-12 -4,-5 4,-5" fill="#FBBF24" />
+                <line x1="0" y1="10" x2="0" y2="-10" stroke="#10B981" strokeWidth="2.2" />
+                <polygon points="0,-12 -4,-5 4,-5" fill="#10B981" />
               </g>
-              <text x="0" y="28" textAnchor="middle" fontSize="8" fontWeight="bold" fill="#FFFFFF">
+              <text className="tabular-nums" x="0" y="28" textAnchor="middle" fontSize="8" fontWeight="bold" fill="#FFFFFF">
                 {degreesToCompass(weather.windDirDeg)} {formatSpeed(weather.windSpeedMph)}
               </text>
             </g>
@@ -1495,7 +1495,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
           </svg>
 
           {pairedApproachClub && (
-            <div className="p-2.5 rounded-xl border text-xs flex items-center justify-between" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
+            <div className="p-2.5 rounded-xl border text-xs flex items-center justify-between tabular-nums" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
               <span>
                 <strong>2-Shot Combo:</strong> {activeClub.club_type} ({formatDistance(activeClub.effectiveTotal)}) -&gt; <strong>{pairedApproachClub.club_type}</strong> ({formatDistance(activeClub.remainingToPin)} in)
               </span>
@@ -1516,7 +1516,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
                   }
                   setSelectedClubId(club.id);
                 }}
-                className={`px-3 py-2 rounded-xl text-xs font-semibold border shrink-0 transition ${
+                className={`min-h-[44px] px-3 py-2 rounded-xl text-xs font-semibold border shrink-0 transition ${
                   activeClub.id === club.id ? 'bg-emerald-700 text-white border-emerald-700' : ''
                 }`}
                 style={activeClub.id !== club.id ? { borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' } : {}}
@@ -1528,7 +1528,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
           </div>
 
           {(activeClub.hitsBunker || !activeClub.missesWater) && (
-            <div className="text-xs text-red-400 font-medium flex items-center gap-1.5">
+            <div className="text-xs text-red-400 font-medium flex items-center gap-1.5 tabular-nums">
               <AlertTriangle size={14} /> Hazard Alert: Adjusted carry ({formatDistance(activeClub.effectiveCarry)}) brings trouble into play.
             </div>
           )}
@@ -1540,9 +1540,9 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
       )}
 
       {/* Live GPS Shot Yardage & Fairway Tracker */}
-      <div className="rounded-2xl p-4 border space-y-2.5" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
+      <div className="rounded-3xl p-4 border space-y-2.5" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
         <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--accent-gold)' }}>
+          <span className="text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--accent-emerald)' }}>
             <LocateFixed size={14} /> Live GPS Shot Yardage Tracker
           </span>
           {(lastMeasuredShot || currentStat.driveYards) && (
@@ -1557,7 +1557,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
             type="button"
             onClick={handleMarkShotStart}
             disabled={trackingShot}
-            className="flex-1 py-2 rounded-xl text-xs font-semibold border"
+            className="flex-1 min-h-[44px] py-2 rounded-xl text-xs font-semibold border"
             style={{
               backgroundColor: shotStartGps ? 'rgba(16,185,129,0.16)' : 'var(--bg-elevated)',
               borderColor: shotStartGps ? 'var(--accent-emerald)' : 'var(--border-subtle)',
@@ -1571,7 +1571,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
             type="button"
             onClick={handleMeasureShotEnd}
             disabled={!shotStartGps || trackingShot}
-            className="flex-1 py-2 rounded-xl text-xs font-semibold text-white disabled:opacity-40"
+            className="flex-1 min-h-[44px] py-2 rounded-xl text-xs font-semibold text-white disabled:opacity-40"
             style={{ backgroundColor: 'var(--accent-emerald)' }}
           >
             {trackingShot ? 'Reading GPS...' : '2. Measure at Ball'}
@@ -1580,7 +1580,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
       </div>
 
       {/* Full Hole-by-Hole Scorecard: Total Strokes, Fairway Hit, GIR & Putts */}
-      <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-emerald)' }}>
+      <div className="rounded-3xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-emerald)' }}>
         <div className="flex items-center justify-between">
           <div>
             <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent-emerald)' }}>
@@ -1590,7 +1590,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               GIR auto-detects when (Strokes - Putts) &le; {activeHole.par - 2}
             </div>
           </div>
-          <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-full tabular-nums" style={{ backgroundColor: 'var(--bg-elevated)', color: 'var(--accent-gold)' }}>
+          <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-full tabular-nums" style={{ backgroundColor: 'var(--bg-elevated)', color: 'var(--accent-emerald)' }}>
             {holesLogged > 0 ? `${totalStrokes} (${relPar === 0 ? 'E' : relPar > 0 ? `+${relPar}` : relPar})` : 'Ready'}
           </span>
         </div>
@@ -1603,7 +1603,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               <button
                 type="button"
                 onClick={() => updateHoleStat({ strokes: currentStat.strokes - 1 })}
-                className="w-7 h-7 rounded-lg border font-bold text-sm"
+                className="min-h-[44px] min-w-[44px] rounded-lg border font-bold text-sm"
                 style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
               >
                 -
@@ -1612,7 +1612,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               <button
                 type="button"
                 onClick={() => updateHoleStat({ strokes: currentStat.strokes + 1 })}
-                className="w-7 h-7 rounded-lg border font-bold text-sm"
+                className="min-h-[44px] min-w-[44px] rounded-lg border font-bold text-sm"
                 style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
               >
                 +
@@ -1626,7 +1626,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               <button
                 type="button"
                 onClick={() => updateHoleStat({ putts: currentStat.putts - 1 })}
-                className="w-7 h-7 rounded-lg border font-bold text-sm"
+                className="min-h-[44px] min-w-[44px] rounded-lg border font-bold text-sm"
                 style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
               >
                 -
@@ -1635,7 +1635,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               <button
                 type="button"
                 onClick={() => updateHoleStat({ putts: currentStat.putts + 1 })}
-                className="w-7 h-7 rounded-lg border font-bold text-sm"
+                className="min-h-[44px] min-w-[44px] rounded-lg border font-bold text-sm"
                 style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
               >
                 +
@@ -1659,7 +1659,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
                     key={opt.id}
                     type="button"
                     onClick={() => updateHoleStat({ fir: opt.id })}
-                    className={`py-1 rounded-lg font-semibold text-[11px] border ${
+                    className={`min-h-[44px] py-1 rounded-lg font-semibold text-[11px] border ${
                       currentStat.fir === opt.id
                         ? opt.id === 'hit'
                           ? 'bg-emerald-700 text-white border-emerald-700'
@@ -1691,7 +1691,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
                   key={String(opt.val)}
                   type="button"
                   onClick={() => updateHoleStat({ gir: opt.val })}
-                  className={`py-1 rounded-lg font-semibold text-[11px] border ${
+                  className={`min-h-[44px] py-1 rounded-lg font-semibold text-[11px] border ${
                     Boolean(currentStat.gir) === opt.val
                       ? opt.val
                         ? 'bg-emerald-700 text-white border-emerald-700'
@@ -1728,12 +1728,12 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         </div>
       </div>
 
-      <div className="rounded-2xl p-4 border space-y-2.5" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
+      <div className="rounded-3xl p-4 border space-y-2.5" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--accent-emerald)' }}>
             <Flag size={14} /> Green Complex & Dew-Point Stimp
           </span>
-          <span className="text-[11px] font-mono font-semibold" style={{ color: 'var(--accent-gold)' }}>{estStimp}</span>
+          <span className="text-[11px] font-mono font-semibold tabular-nums" style={{ color: 'var(--accent-emerald)' }}>{estStimp}</span>
         </div>
 
         <div className="grid grid-cols-3 gap-2 text-center">
@@ -1755,15 +1755,15 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
       <button
         type="button"
         onClick={onOpenWearable}
-        className="w-full rounded-2xl p-3.5 border flex items-center justify-between text-left"
+        className="w-full rounded-3xl p-3.5 border flex items-center justify-between text-left"
         style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
       >
         <div className="flex items-center gap-2 text-xs">
-          <Watch size={15} style={{ color: 'var(--accent-gold)' }} />
-          <Glasses size={15} style={{ color: 'var(--accent-gold)' }} />
+          <Watch size={15} style={{ color: 'var(--accent-emerald)' }} />
+          <Glasses size={15} style={{ color: 'var(--accent-emerald)' }} />
           <span>Watch & Meta Glasses Feed: <strong className="tabular-nums">{bestClub?.club_type} ({formatDistance(bestClub?.effectiveCarry)})</strong></span>
         </div>
-        <span className="text-[11px] font-semibold underline" style={{ color: 'var(--accent-gold)' }}>Preview HUD</span>
+        <span className="text-[11px] font-semibold underline" style={{ color: 'var(--accent-emerald)' }}>Preview HUD</span>
       </button>
     </div>
   );
