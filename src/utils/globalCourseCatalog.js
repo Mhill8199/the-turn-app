@@ -18,6 +18,7 @@ const PAR_18 = [4, 5, 4, 3, 4, 4, 3, 5, 4, 4, 4, 3, 5, 4, 4, 5, 3, 4];
 const PAR_9 = [4, 5, 4, 3, 4, 4, 3, 5, 4];
 
 function finiteOrNull(value) {
+  if (value == null || value === '') return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
@@ -215,7 +216,7 @@ export function dedupeCourses(courses) {
         break;
       }
       if (osmId && existingOsm && !sameOsmId(osmId, existingOsm)) continue;
-      if (!norm || !courseNamesMatch(course, existing)) continue;
+      if (!courseNamesMatch(course, existing)) continue;
       const existingLat = finiteOrNull(existing.lat);
       const existingLon = finiteOrNull(existing.lon);
       if (lat == null || lon == null || existingLat == null || existingLon == null) {
@@ -291,8 +292,9 @@ export const STARTER_COURSES = [
     name: 'Dos Lagos Golf Club',
     city: 'Corona, CA',
     state: 'CA',
-    lat: 33.8139,
-    lon: -117.5156,
+    lat: 33.8229,
+    lng: -117.5214,
+    lon: -117.5214,
     elevationFt: 740,
     holeCount: 18,
     par: 72,

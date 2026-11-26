@@ -63,6 +63,8 @@ export default function ActiveRoundFocus({
   onNext,
   onEndRound,
   centerYards,
+  frontYards,
+  backYards,
   pinYards,
   windSpeedMph = 0,
   windDirDeg = 0,
@@ -82,6 +84,8 @@ export default function ActiveRoundFocus({
   const night = themeApi.theme ? themeApi.theme === 'dark' : localNight;
   const rawPin = Number.isFinite(Number(pinYards)) ? Number(pinYards) : Number(centerYards) || 0;
   const rawCenter = Number.isFinite(Number(centerYards)) ? Number(centerYards) : rawPin;
+  const front = Number.isFinite(Number(frontYards)) ? Number(frontYards) : Math.max(40, rawCenter - 12);
+  const back = Number.isFinite(Number(backYards)) ? Number(backYards) : rawCenter + 14;
   const { windMph, deltaYards, kind } = relativeWind(windSpeedMph, windDirDeg, holeBearingDeg);
   const playsLikeYards = Math.max(0, Math.round(rawPin + deltaYards));
   const matched = closestClub(clubs, playsLikeYards);
@@ -118,12 +122,12 @@ export default function ActiveRoundFocus({
 
   return (
     <div
-      className="fixed inset-0 z-40 flex flex-col"
+      className="fixed inset-0 z-40 flex h-[100dvh] w-screen flex-col"
       style={{ backgroundColor: night ? '#0B0D0C' : '#F6F5F0', color: 'var(--text-primary)' }}
     >
       <div className="mx-auto flex h-full min-h-0 w-full max-w-md flex-col">
         <header
-          className="flex shrink-0 items-center gap-1.5 border-b px-2 py-1.5"
+          className="relative z-50 flex shrink-0 items-center gap-1.5 border-b px-2 py-1.5"
           style={{ borderColor: 'var(--border-subtle)', backgroundColor: night ? '#0B0D0C' : '#FFFFFF' }}
         >
           <button
@@ -184,7 +188,7 @@ export default function ActiveRoundFocus({
 
         <div className="flex min-h-0 flex-1 flex-col">{children}</div>
 
-        <div className="shrink-0 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2">
+        <div className="relative z-50 shrink-0 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2">
           <div className="space-y-2 rounded-3xl border bg-[#0B0D0C] p-3 text-white">
             <div className="flex items-end justify-between gap-3">
               <div>
@@ -197,6 +201,21 @@ export default function ActiveRoundFocus({
                 <div className="text-xs text-[#10B981]">
                   Stock <span className="tabular-nums">{formatDistance(clubCarry, distanceUnit)}</span>
                 </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-1.5 text-center">
+              <div className="rounded-2xl border border-[#10B981]/50 px-1 py-1.5">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-[#10B981]">Front</div>
+                <div className="tabular-nums text-sm font-semibold">{formatDistance(front, distanceUnit)}</div>
+              </div>
+              <div className="rounded-2xl border border-[#10B981] px-1 py-1.5">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-[#10B981]">Center</div>
+                <div className="tabular-nums text-sm font-semibold">{formatDistance(rawCenter, distanceUnit)}</div>
+              </div>
+              <div className="rounded-2xl border border-[#10B981]/50 px-1 py-1.5">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-[#10B981]">Back</div>
+                <div className="tabular-nums text-sm font-semibold">{formatDistance(back, distanceUnit)}</div>
               </div>
             </div>
 

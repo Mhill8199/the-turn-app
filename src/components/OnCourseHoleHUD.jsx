@@ -80,6 +80,7 @@ export default function OnCourseHoleHUD({
         {hasCoords ? (
           <SatelliteHoleMap
             fill
+            isRoundActive
             courseName={courseName}
             lat={Number(lat)}
             lon={Number(lon)}
