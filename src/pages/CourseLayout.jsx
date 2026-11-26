@@ -45,6 +45,25 @@ import ActiveRoundFocus from '../components/ActiveRoundFocus';
 import { useUnits } from '../utils/distanceUnits';
 import { useLanguage } from '../i18n/LanguageContext';
 import { buildWearablePayload, resolveTtsLocale, speakCaddieCallout } from '../utils/wearableAndAudioCaddie';
+import { useAuth } from '../context/AuthContext';
+import RoundWarmupModal from '../components/RoundWarmupModal';
+import {
+  TRIP_PROXIMITY_METERS,
+  loadTripQueue,
+  saveTripQueue,
+  syncTripQueue,
+  pullRemoteTrips,
+  mergeTrips,
+  nextQueuedTrip,
+  closestQueuedTrip,
+  formatTripLine,
+  formatUpNext,
+  formatPartners,
+  createTrip,
+  prefetchTripCourse,
+  upcomingDateISO,
+  METERS_PER_YARD,
+} from '../utils/tripQueue';
 
 const CUSTOM_COURSES_KEY = 'the-turn-custom-courses';
 const SCORES_KEY = 'the-turn-scores-v2';
@@ -150,6 +169,7 @@ function CourseResultButton({ course, origin, formatDistance, onSelect }) {
 export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall, onOpenWearable, onActiveHole }) {
   const { distanceUnit, formatDistance, formatSpeed } = useUnits();
   const { lang } = useLanguage();
+  const { user } = useAuth();
   const [caddiePayload, setCaddiePayload] = useState(null);
   const caddieHoleArmed = useRef(false);
   const [customCourses, setCustomCourses] = useState(() => {
@@ -226,6 +246,20 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
 
   const [isRoundActive, setIsRoundActive] = useState(false);
   const [pinTarget, setPinTarget] = useState(null);
+  const [trips, setTrips] = useState(() => loadTripQueue());
+  const [tripDrawerOpen, setTripDrawerOpen] = useState(false);
+  const [warmupOpen, setWarmupOpen] = useState(false);
+  const [roundPartners, setRoundPartners] = useState('');
+  const [proximity, setProximity] = useState(null);
+  const [hiddenProximityIds, setHiddenProximityIds] = useState([]);
+  const [tripDraft, setTripDraft] = useState({
+    courseId: '',
+    teeBox: 'blue',
+    date: '',
+    teeTime: '08:30',
+    playingPartners: '',
+    notes: '',
+  });
   const roundActiveRef = useRef(false);
   roundActiveRef.current = isRoundActive;
 
@@ -359,6 +393,32 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   useEffect(() => {
     localStorage.setItem(PINS_KEY, JSON.stringify(missPins));
   }, [missPins]);
+
+  useEffect(() => {
+    if (!user?.id) return undefined;
+    let cancelled = false;
+    pullRemoteTrips(user.id).then((remote) => {
+      if (cancelled || !remote) return;
+      setTrips((local) => {
+        const merged = mergeTrips(local, remote);
+        saveTripQueue(merged);
+        return merged;
+      });
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!trips.length || typeof navigator === 'undefined' || !navigator.geolocation) return undefined;
+    const watch = navigator.geolocation.watchPosition(
+      (pos) => {
+        setProximity(closestQueuedTrip(trips, pos.coords.latitude, pos.coords.longitude, TRIP_PROXIMITY_METERS));
+      },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 20000, timeout: 15000 }
+    );
+    return () => navigator.geolocation.clearWatch(watch);
+  }, [trips]);
 
   const recentRows = useMemo(
     () => dedupeCourses([...customCourses, ...libraryCourses, ...STARTER_COURSES]),
@@ -818,6 +878,65 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
     );
   };
 
+  const commitTrips = (next) => {
+    setTrips(next);
+    syncTripQueue(next, user?.id).catch(() => {});
+  };
+
+  const startQueuedRound = (trip) => {
+    if (!trip) return;
+    const known = allCourses.find((course) => course.id === trip.courseId)
+      || allCourses.find((course) => course.name === trip.courseName);
+    const course = known || {
+      id: trip.courseId || `trip-${trip.id}`,
+      name: trip.courseName,
+      lat: trip.lat,
+      lon: trip.lon,
+      holes: [],
+    };
+    selectCourse(course);
+    if (TEE_BOXES.some((box) => box.id === trip.teeBox)) setTeeId(trip.teeBox);
+    setRoundPartners(formatPartners(trip.playingPartners));
+    setHoleIdx(0);
+    setPinTarget(null);
+    setTripDrawerOpen(false);
+    setIsRoundActive(true);
+  };
+
+  const openTripDrawer = () => {
+    setTripDraft((draft) => ({
+      ...draft,
+      courseId: draft.courseId || activeCourse?.id || '',
+      teeBox: teeId,
+      date: draft.date || upcomingDateISO(1),
+    }));
+    setTripDrawerOpen(true);
+  };
+
+  const queueTrip = (event) => {
+    event.preventDefault();
+    const course = allCourses.find((item) => item.id === tripDraft.courseId) || activeCourse;
+    if (!course?.name || !tripDraft.date || !tripDraft.teeTime) return;
+    const trip = createTrip({
+      courseId: course.id,
+      courseName: course.name,
+      lat: course.lat,
+      lon: course.lon,
+      teeBox: tripDraft.teeBox || teeId,
+      date: tripDraft.date,
+      teeTime: tripDraft.teeTime,
+      playingPartners: tripDraft.playingPartners,
+      notes: tripDraft.notes,
+    });
+    commitTrips([...trips, trip]);
+    prefetchTripCourse(trip).catch(() => {});
+    setTripDraft((draft) => ({ ...draft, notes: '' }));
+  };
+
+  const removeQueuedTrip = (id) => {
+    commitTrips(trips.filter((trip) => trip.id !== id));
+  };
+
   if (isRoundActive) {
     const targetYards = Number.isFinite(Number(pinTarget?.yards)) ? Number(pinTarget.yards) : activeHole.yards;
     return (
@@ -841,6 +960,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         holeBearingDeg={activeHole.bearingDeg}
         clubs={clubs}
         suggestion={activeHole.note || aimAdvice}
+        crewLabel={roundPartners}
       >
         <SatelliteHoleMap
           fill
@@ -852,9 +972,11 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
             number: activeHole.number,
             par: activeHole.par,
             bearingDeg: activeHole.bearingDeg,
+            yards: activeHole.yards,
             lat: activeHole.lat,
             lon: activeHole.lon,
           }}
+          clubs={clubs}
           origin={shotStartGps ? { lat: shotStartGps.lat, lon: shotStartGps.lon } : undefined}
           onPinChange={setPinTarget}
         />
@@ -862,22 +984,83 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
     );
   }
 
+  const upNext = nextQueuedTrip(trips);
+  const showProximity = Boolean(proximity?.trip) && !hiddenProximityIds.includes(proximity.trip.id);
+
   return (
-    <div className="space-y-4 pb-24">
+    <div className="space-y-4 pb-[max(6rem,env(safe-area-inset-bottom))]">
+      {showProximity ? (
+        <div className="rounded-3xl border p-4 space-y-3" style={{ backgroundColor: '#0B0D0C', borderColor: '#D4AF37', color: '#F8F7F4' }}>
+          <div className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: '#D4AF37' }}>Queued course nearby</div>
+          <p className="text-sm">
+            {proximity.trip.courseName} is <span className="tabular-nums">{formatDistance(proximity.meters / METERS_PER_YARD)}</span> away. Start this round?
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => startQueuedRound(proximity.trip)}
+              className="min-h-[44px] flex-1 rounded-2xl text-sm font-semibold text-white"
+              style={{ backgroundColor: '#10B981' }}
+            >
+              Start Round Now
+            </button>
+            <button
+              type="button"
+              onClick={() => setHiddenProximityIds((ids) => [...ids, proximity.trip.id])}
+              className="min-h-[44px] rounded-2xl border px-4 text-sm font-semibold"
+              style={{ borderColor: '#D4AF37', color: '#D4AF37' }}
+            >
+              Not now
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {upNext ? (
+        <div className="rounded-3xl border p-4 space-y-3" style={{ backgroundColor: '#0B0D0C', borderColor: '#D4AF37', color: '#F8F7F4' }}>
+          <div className="text-base font-semibold">{formatUpNext(upNext)}</div>
+          <button
+            type="button"
+            onClick={() => startQueuedRound(upNext)}
+            className="w-full min-h-[44px] rounded-2xl text-sm font-semibold text-white"
+            style={{ backgroundColor: '#10B981' }}
+          >
+            Start Round Now
+          </button>
+        </div>
+      ) : null}
       <div className="rounded-3xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setRoundPartners('');
+              setPinTarget(null);
+              if (activeCourse?.id === 'dos-lagos' || /dos\s*lagos/i.test(activeCourse?.name || '')) {
+                setHoleIdx(0);
+              }
+              setIsRoundActive(true);
+            }}
+            className="min-h-[44px] flex-1 rounded-2xl text-sm font-semibold text-white"
+            style={{ backgroundColor: 'var(--accent-emerald)' }}
+          >
+            Start Round
+          </button>
+          <button
+            type="button"
+            onClick={() => setWarmupOpen(true)}
+            className="min-h-[44px] rounded-full px-4 text-sm font-semibold"
+            style={{ color: '#D4AF37', border: '1px solid #D4AF37', backgroundColor: '#0B0D0C' }}
+          >
+            Round Warm-Up
+          </button>
+        </div>
         <button
           type="button"
-          onClick={() => {
-            setPinTarget(null);
-            if (activeCourse?.id === 'dos-lagos' || /dos\s*lagos/i.test(activeCourse?.name || '')) {
-              setHoleIdx(0);
-            }
-            setIsRoundActive(true);
-          }}
-          className="w-full min-h-[44px] rounded-2xl text-sm font-semibold text-white"
-          style={{ backgroundColor: 'var(--accent-emerald)' }}
+          onClick={openTripDrawer}
+          className="w-full min-h-[44px] rounded-2xl text-sm font-semibold"
+          style={{ color: '#D4AF37', border: '1px solid #D4AF37', backgroundColor: 'transparent' }}
         >
-          Start Round
+          Plan Trip / Queue Round
         </button>
         <div ref={pickerRef} className="relative space-y-2">
           <div className="flex items-center gap-1.5">
@@ -1441,9 +1624,12 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
             hole={{
               number: activeHole.number,
               par: activeHole.par,
+              yards: activeHole.yards,
+              bearingDeg: activeHole.bearingDeg,
               lat: activeHole.lat,
               lon: activeHole.lon,
             }}
+            clubs={clubs}
             origin={shotStartGps ? { lat: shotStartGps.lat, lon: shotStartGps.lon } : undefined}
             onPinChange={creatorOpen && creatorMode === 'course' ? (pin) => {
               const lat = Number(pin?.lat);
@@ -1998,10 +2184,163 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         </div>
         <span className="text-[11px] font-semibold underline" style={{ color: 'var(--accent-emerald)' }}>Preview HUD</span>
       </button>
+      <TripQueueDrawer
+        open={tripDrawerOpen}
+        onClose={() => setTripDrawerOpen(false)}
+        courses={allCourses}
+        draft={tripDraft}
+        setDraft={setTripDraft}
+        trips={trips}
+        onQueue={queueTrip}
+        onRemove={removeQueuedTrip}
+      />
+      <RoundWarmupModal open={warmupOpen} onClose={() => setWarmupOpen(false)} clubs={clubs} />
     </div>
   );
 }
 
 function firHitCountLabel(hits, eligible) {
   return `${hits}/${eligible}`;
+}
+
+function TripQueueDrawer({ open, onClose, courses, draft, setDraft, trips, onQueue, onRemove }) {
+  if (!open) return null;
+  const fieldStyle = { backgroundColor: '#141816', borderColor: 'rgba(255,255,255,0.14)', color: '#F8F7F4' };
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center"
+      style={{ backgroundColor: 'rgba(11, 13, 12, 0.72)' }}
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Plan Trip / Queue Round"
+        className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-t-3xl border p-4"
+        style={{
+          backgroundColor: '#0B0D0C',
+          borderColor: 'rgba(212, 175, 55, 0.55)',
+          color: '#F8F7F4',
+          paddingBottom: 'max(1rem, env(safe-area-inset-bottom))',
+        }}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: '#D4AF37' }}>Golf trip</div>
+            <h2 className="text-lg font-semibold">Plan Trip / Queue Round</h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close trip planner"
+            className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-2xl border"
+            style={{ borderColor: 'rgba(255,255,255,0.16)' }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+        <form onSubmit={onQueue} className="space-y-2">
+          <label className="block text-[11px] font-semibold uppercase tracking-wider" style={{ color: '#D4AF37' }}>
+            Course
+            <select
+              value={draft.courseId}
+              onChange={(event) => setDraft((prev) => ({ ...prev, courseId: event.target.value }))}
+              className="mt-1 w-full min-h-[44px] rounded-xl border px-3 text-sm"
+              style={fieldStyle}
+            >
+              {(courses || []).map((course) => (
+                <option key={course.id} value={course.id}>{course.name}</option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-[11px] font-semibold uppercase tracking-wider" style={{ color: '#D4AF37' }}>
+            Tee box
+            <select
+              value={draft.teeBox}
+              onChange={(event) => setDraft((prev) => ({ ...prev, teeBox: event.target.value }))}
+              className="mt-1 w-full min-h-[44px] rounded-xl border px-3 text-sm"
+              style={fieldStyle}
+            >
+              {TEE_BOXES.map((tee) => (
+                <option key={tee.id} value={tee.id}>{tee.label}</option>
+              ))}
+            </select>
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block text-[11px] font-semibold uppercase tracking-wider" style={{ color: '#D4AF37' }}>
+              Date
+              <input
+                type="date"
+                required
+                value={draft.date}
+                onChange={(event) => setDraft((prev) => ({ ...prev, date: event.target.value }))}
+                className="mt-1 w-full min-h-[44px] rounded-xl border px-3 text-sm tabular-nums"
+                style={fieldStyle}
+              />
+            </label>
+            <label className="block text-[11px] font-semibold uppercase tracking-wider" style={{ color: '#D4AF37' }}>
+              Tee time
+              <input
+                type="time"
+                required
+                value={draft.teeTime}
+                onChange={(event) => setDraft((prev) => ({ ...prev, teeTime: event.target.value }))}
+                className="mt-1 w-full min-h-[44px] rounded-xl border px-3 text-sm tabular-nums"
+                style={fieldStyle}
+              />
+            </label>
+          </div>
+          <label className="block text-[11px] font-semibold uppercase tracking-wider" style={{ color: '#D4AF37' }}>
+            Playing partners
+            <input
+              type="text"
+              value={draft.playingPartners}
+              onChange={(event) => setDraft((prev) => ({ ...prev, playingPartners: event.target.value }))}
+              placeholder="Jason, Rylie, Ryan"
+              className="mt-1 w-full min-h-[44px] rounded-xl border px-3 text-sm"
+              style={fieldStyle}
+            />
+          </label>
+          <label className="block text-[11px] font-semibold uppercase tracking-wider" style={{ color: '#D4AF37' }}>
+            Notes
+            <textarea
+              value={draft.notes}
+              onChange={(event) => setDraft((prev) => ({ ...prev, notes: event.target.value }))}
+              rows={2}
+              className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+              style={fieldStyle}
+            />
+          </label>
+          <button
+            type="submit"
+            className="w-full min-h-[44px] rounded-2xl text-sm font-semibold text-white"
+            style={{ backgroundColor: '#10B981' }}
+          >
+            Queue Round
+          </button>
+          <p className="text-[11px]" style={{ color: '#D1D5DB' }}>
+            Hole shapes and satellite tiles save in the background. A failed download still keeps the trip.
+          </p>
+        </form>
+        <div className="mt-4 space-y-2">
+          {(trips || []).length === 0 ? (
+            <p className="text-sm" style={{ color: '#D1D5DB' }}>No rounds queued.</p>
+          ) : trips.map((trip) => (
+            <div key={trip.id} className="flex items-center gap-2 rounded-3xl border px-3 py-2" style={{ borderColor: 'rgba(212, 175, 55, 0.45)' }}>
+              <div className="min-w-0 flex-1 text-sm">{formatTripLine(trip)}</div>
+              <button
+                type="button"
+                onClick={() => onRemove(trip.id)}
+                className="min-h-[44px] shrink-0 rounded-xl px-3 text-xs font-semibold"
+                style={{ color: '#D4AF37' }}
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }

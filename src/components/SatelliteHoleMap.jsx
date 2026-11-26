@@ -4,6 +4,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { COURSE_PRESETS } from '../lib/weatherPhysics';
 import { supabase } from '../lib/supabase';
 import { useUnits } from '../utils/distanceUnits';
+import { rewriteCachedTileRequest } from '../utils/tripQueue';
 
 /**
  * Basemap choice (never log the token):
@@ -19,8 +20,7 @@ const STORE_NAME = 'courses';
 const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
 const DOCUMENTED_DEFAULT = { lat: 33.8229, lon: -117.5214 };
 const DOS_LAGOS = { lat: 33.8229, lon: -117.5214 };
-const USGS_TOPO = 'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryTopo/MapServer/tile/{z}/{y}/{x}';
-const ROUND_FIT_PADDING = { top: 96, bottom: 180, left: 48, right: 48 };
+const ROUND_FIT_PADDING = { top: 108, bottom: 280, left: 40, right: 64 };
 const GOLF_TAGS = ['fairway', 'hole', 'green', 'bunker', 'water_hazard'];
 
 function mapboxToken() {
@@ -81,18 +81,10 @@ function usgsRasterStyle() {
         maxzoom: 16,
         attribution: 'USGS National Map',
       },
-      'usgs-topo': {
-        type: 'raster',
-        tiles: [USGS_TOPO],
-        tileSize: 256,
-        maxzoom: 16,
-        attribution: 'USGS National Map',
-      },
     },
     layers: [
       { id: 'usgs-basemap-color', type: 'background', paint: { 'background-color': '#0B0D0C' } },
       { id: 'usgs-imagery', type: 'raster', source: 'usgs-imagery' },
-      { id: 'usgs-topo', type: 'raster', source: 'usgs-topo', paint: { 'raster-opacity': 0.35 } },
     ],
   };
 }
@@ -142,13 +134,49 @@ async function loadUsgsLibertyStyle(signal) {
   };
 }
 
+/** Add liberty labels after the USGS raster is already on screen. A failed fetch leaves the imagery up. */
+async function attachLibertyLabels(map, signal) {
+  try {
+    const style = await loadUsgsLibertyStyle(signal);
+    if (signal?.aborted || !map?.getStyle?.()) return;
+    try {
+      if (style.glyphs) map.setGlyphs(style.glyphs);
+      if (typeof style.sprite === 'string') map.setSprite(style.sprite);
+    } catch (error) {
+      console.warn(error?.message || 'Label style skipped');
+    }
+    for (const [id, source] of Object.entries(style.sources || {})) {
+      if (id === 'usgs-imagery' || map.getSource(id)) continue;
+      try {
+        map.addSource(id, source);
+      } catch (error) {
+        console.warn(error?.message || 'Label source skipped');
+      }
+    }
+    for (const layer of style.layers || []) {
+      if (!layer?.id || layer.id === 'usgs-imagery' || layer.id === 'usgs-basemap-color' || layer.id === 'usgs-topo') continue;
+      if (map.getLayer(layer.id) || (layer.source && !map.getSource(layer.source))) continue;
+      try {
+        const before = map.getLayer('hole-fairways-fill') ? 'hole-fairways-fill' : undefined;
+        map.addLayer(layer, before);
+      } catch (error) {
+        console.warn(error?.message || 'Label layer skipped');
+      }
+    }
+  } catch (error) {
+    if (error?.name === 'AbortError') return;
+    console.warn(error?.message || 'Label overlay unavailable');
+  }
+}
+
 function applyBasemapMode(map, schematic, restore) {
   const layers = map.getStyle()?.layers;
   if (!layers) return;
   for (const layer of layers) {
     if (!layer?.id || layer.id.startsWith('hole-')) continue;
     if (layer.type === 'raster') {
-      map.setPaintProperty(layer.id, 'raster-opacity', schematic ? 0 : 1);
+      const opacity = layer.id === 'usgs-topo' ? 0.35 : 1;
+      map.setPaintProperty(layer.id, 'raster-opacity', schematic ? 0 : opacity);
     } else if (layer.type === 'background') {
       if (!restore.has(layer.id)) {
         restore.set(layer.id, map.getPaintProperty(layer.id, 'background-color') ?? '#0B0D0C');
@@ -348,23 +376,20 @@ function parseOverpass(data) {
   return features;
 }
 
-function buildOverpassQuery(bbox) {
-  const box = [bbox.south, bbox.west, bbox.north, bbox.east].map((n) => n.toFixed(5)).join(',');
-  const clauses = [];
-  for (const tag of GOLF_TAGS) {
-    clauses.push(`way["golf"="${tag}"](${box});`);
-    clauses.push(`relation["golf"="${tag}"](${box});`);
-  }
-  clauses.push(`way["waterway"]["golf"="water_hazard"](${box});`);
-  clauses.push(`way["natural"="water"]["golf"="water_hazard"](${box});`);
-  clauses.push(`relation["natural"="water"]["golf"="water_hazard"](${box});`);
-  return `[out:json][timeout:20];(${clauses.join('')});out geom;`;
+function isDosLagosCourse(name) {
+  return /dos\s*lagos/i.test(String(name || ''));
 }
 
-async function fetchGolfFeatures(lat, lon, signal) {
+function overpassAround(lat, lon, dosLagos) {
+  const la = dosLagos ? '33.8229' : Number(lat).toFixed(5);
+  const lo = dosLagos ? '-117.5214' : Number(lon).toFixed(5);
+  return `[out:json][timeout:25];(way["golf"~"hole|green|fairway|bunker|tee|water_hazard"](around:1200,${la},${lo}););out geom;`;
+}
+
+async function fetchGolfFeatures(lat, lon, dosLagos, signal) {
   const response = await fetch(OVERPASS_URL, {
     method: 'POST',
-    body: buildOverpassQuery(cellBBox(lat, lon)),
+    body: overpassAround(lat, lon, dosLagos),
     signal,
   });
   if (!response.ok) throw new Error(`Overpass ${response.status}`);
@@ -537,7 +562,7 @@ function resolvePlaying(features, holeNum, anchor, cardBearing, cardYards) {
   const rings = greenFeature?.rings?.length ? [longestRing(greenFeature.rings)] : [];
   const green = rings[0]?.length >= 3 ? ringCentroid(rings[0]) : (greenEnd || tee);
   const depth = depthPoints(tee, green, rings);
-  return { tee, green: depth.center, front: depth.front, back: depth.back };
+  return { tee, green: depth.center, front: depth.front, back: depth.back, surveyed: Boolean(line) };
 }
 
 function emptyFc() {
@@ -559,6 +584,22 @@ function polygonsFor(features, kind) {
         type: 'Feature',
         properties: { id: feature.id, kind },
         geometry: { type: 'Polygon', coordinates: [coords] },
+      });
+    }
+  }
+  return { type: 'FeatureCollection', features: out };
+}
+
+function linesFor(features, kind) {
+  const out = [];
+  for (const feature of features || []) {
+    if (feature?.kind !== kind) continue;
+    for (const ring of feature.rings || []) {
+      if (!Array.isArray(ring) || ring.length < 2) continue;
+      out.push({
+        type: 'Feature',
+        properties: { id: feature.id, kind, ref: feature.ref ?? null },
+        geometry: { type: 'LineString', coordinates: ring.map((point) => [point.lon, point.lat]) },
       });
     }
   }
@@ -605,11 +646,12 @@ function setSourceData(map, id, data) {
  * Stable GeoJSON ids. A Year-2 Golf Intelligence or Golfbert feed only replaces
  * the FeatureCollections passed into these sources — not the layer stack or HUD.
  *
- * Sources: hole-fairways, hole-greens, hole-bunkers, hole-water, hole-approach, hole-shots
+ * Sources: hole-fairways, hole-greens, hole-bunkers, hole-water, hole-centerlines, hole-approach, hole-shots
  * Layers:  hole-fairways-fill, hole-fairways-line,
  *          hole-greens-fill, hole-greens-line,
  *          hole-bunkers-fill, hole-bunkers-line,
  *          hole-water-fill, hole-water-line,
+ *          hole-centerlines,
  *          hole-approach-carry, hole-approach-green,
  *          hole-shots-line
  * hole-fairways is created even when Overpass returns no fairway polygons.
@@ -620,11 +662,12 @@ function ensureOverlayLayers(map) {
     ['hole-fairways', '#10B981', 0.18, '#10B981', 1.25],
     ['hole-water', '#0284C7', 0.55, '#7DD3FC', 1.4],
     ['hole-bunkers', '#E6D2A1', 0.92, '#A16207', 1.2],
-    ['hole-greens', '#10B981', 0.5, '#A7F3D0', 1.6],
+    ['hole-greens', '#10B981', 0.28, '#10B981', 2.4],
   ];
   for (const [id] of areas) {
     map.addSource(id, { type: 'geojson', data: emptyFc() });
   }
+  map.addSource('hole-centerlines', { type: 'geojson', data: emptyFc() });
   map.addSource('hole-approach', { type: 'geojson', data: emptyFc() });
   map.addSource('hole-shots', { type: 'geojson', data: emptyFc() });
   for (const [id, fill, fillOpacity, line, lineWidth] of areas) {
@@ -637,6 +680,13 @@ function ensureOverlayLayers(map) {
       paint: { 'line-color': line, 'line-width': lineWidth },
     });
   }
+  map.addLayer({
+    id: 'hole-centerlines',
+    type: 'line',
+    source: 'hole-centerlines',
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: { 'line-color': '#F8FAFC', 'line-width': 2.25 },
+  });
   map.addLayer({
     id: 'hole-approach-carry',
     type: 'line',
@@ -651,7 +701,7 @@ function ensureOverlayLayers(map) {
     source: 'hole-approach',
     filter: ['==', ['get', 'leg'], 'green'],
     layout: { 'line-cap': 'round', 'line-join': 'round' },
-    paint: { 'line-color': '#D4AF37', 'line-width': 2.5, 'line-dasharray': [1.4, 1.2] },
+    paint: { 'line-color': '#D4AF37', 'line-width': 2.5, 'line-dasharray': [2, 2] },
   });
   map.addLayer({
     id: 'hole-shots-line',
@@ -708,14 +758,17 @@ export default function SatelliteHoleMap({
   onShotsChange,
   onLivePosition,
   onReticleChange,
+  bearingDeg: bearingProp,
+  isRoundActive = false,
   fill = false,
 }) {
-  const { distanceUnit, formatDistance } = useUnits();
+  const { formatDistance, distanceUnit } = useUnits();
+  const fullscreen = Boolean(fill || isRoundActive);
   const holeNum = hole?.number ?? holeNumber ?? null;
   const propLat = validPoint(hole)?.lat ?? validPoint(center)?.lat ?? (Number.isFinite(Number(lat)) ? Number(lat) : null);
   const propLon = validPoint(hole)?.lon ?? validPoint(center)?.lon ?? (Number.isFinite(Number(lon)) ? Number(lon) : null);
   const cardYards = Number(hole?.yards);
-  const cardBearing = Number(hole?.bearingDeg);
+  const cardBearing = Number.isFinite(Number(hole?.bearingDeg)) ? Number(hole.bearingDeg) : Number(bearingProp);
 
   const anchor = useMemo(() => {
     if (propLat != null && propLon != null) return { lat: propLat, lon: propLon };
@@ -739,6 +792,8 @@ export default function SatelliteHoleMap({
 
   const mapElRef = useRef(null);
   const mapRef = useRef(null);
+  const anchorRef = useRef(anchor);
+  anchorRef.current = anchor;
   const framedRef = useRef('');
   const aimRef = useRef('');
   const bgRestoreRef = useRef(new Map());
@@ -882,7 +937,10 @@ export default function SatelliteHoleMap({
       if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
 
       try {
-        const fresh = await fetchGolfFeatures(cellLat, cellLon, controller.signal);
+        const dosLagos = isDosLagosCourse(courseName);
+        const queryLat = dosLagos ? DOS_LAGOS.lat : anchor.lat;
+        const queryLon = dosLagos ? DOS_LAGOS.lon : anchor.lon;
+        const fresh = await fetchGolfFeatures(queryLat, queryLon, dosLagos, controller.signal);
         if (cancelled) return;
         if (fresh.length) {
           setFeatures(fresh);
@@ -940,7 +998,7 @@ export default function SatelliteHoleMap({
 
   useEffect(() => {
     safeResize(mapRef.current);
-  }, [holeKey, size.width, size.height, fill, mapReady]);
+  }, [holeKey, size.width, size.height, fullscreen, mapReady]);
 
   useEffect(() => {
     const container = mapElRef.current;
@@ -951,24 +1009,10 @@ export default function SatelliteHoleMap({
     const usingMapbox = token.length > 0;
     const startup = new AbortController();
 
-    (async () => {
-      let style = MAPBOX_STYLE;
-      let attribution = '© Mapbox © OpenStreetMap';
-      if (!usingMapbox) {
-        try {
-          style = await loadUsgsLibertyStyle(startup.signal);
-          attribution = 'USGS National Map · © OpenStreetMap / OpenFreeMap';
-        } catch (error) {
-          if (cancelled || error?.name === 'AbortError') return;
-          style = usgsRasterStyle();
-          attribution = 'USGS National Map';
-        }
-      }
-      if (cancelled || !mapElRef.current) return;
-      const start = anchorRef.current || DOCUMENTED_DEFAULT;
-      map = new maplibregl.Map({
+    const start = anchorRef.current || DOCUMENTED_DEFAULT;
+    map = new maplibregl.Map({
         container: mapElRef.current,
-        style,
+        style: usingMapbox ? MAPBOX_STYLE : usgsRasterStyle(),
         center: [start.lon, start.lat],
         zoom: 16,
         bearing: 0,
@@ -976,12 +1020,17 @@ export default function SatelliteHoleMap({
         maxPitch: 0,
         bearingSnap: 0,
         minZoom: 12,
-        maxZoom: 20,
+        maxZoom: 19,
         fadeDuration: 0,
-        attributionControl: { compact: false, customAttribution: attribution },
-        transformRequest: usingMapbox ? (url) => ({ url: rewriteMapboxUrl(url, token) }) : undefined,
+        attributionControl: { compact: false, customAttribution: usingMapbox ? '© Mapbox © OpenStreetMap' : 'USGS National Map · © OpenStreetMap / OpenFreeMap' },
+        transformRequest: (url) => rewriteCachedTileRequest(url).then((cached) => {
+          if (cached) return cached;
+          if (usingMapbox) return { url: rewriteMapboxUrl(url, token) };
+          return { url };
+        }),
       });
       mapRef.current = map;
+      map.resize();
       map.dragRotate?.disable?.();
       map.touchZoomRotate?.disableRotation?.();
       map.keyboard?.disableRotation?.();
@@ -997,6 +1046,7 @@ export default function SatelliteHoleMap({
         setMapError('');
         setMapReady(true);
         setZoomLabel(String(Math.round(map.getZoom())));
+        if (!usingMapbox) attachLibertyLabels(map, startup.signal);
       });
       map.on('zoom', () => {
         if (!cancelled) setZoomLabel(String(Math.round(map.getZoom())));
@@ -1007,11 +1057,11 @@ export default function SatelliteHoleMap({
       });
       map.on('error', (event) => {
         if (cancelled) return;
-        const raw = String(event?.error?.message || '');
-        if (!/style|WebGL|Failed to initialize/i.test(raw)) return;
-        setMapError(raw.replace(/access_token=[^&\s]+/gi, 'access_token=redacted'));
+        const raw = String(event?.error?.message || 'map tile warning');
+        const safe = raw.replace(/access_token=[^&\s]+/gi, 'access_token=redacted');
+        console.warn(safe);
+        if (/WebGL|Failed to initialize/i.test(raw)) setMapError(safe);
       });
-    })();
 
     return () => {
       cancelled = true;
@@ -1022,21 +1072,18 @@ export default function SatelliteHoleMap({
     };
   }, []);
 
-  const anchorRef = useRef(anchor);
-  anchorRef.current = anchor;
-
   useEffect(() => {
     const root = mapElRef.current;
     if (!root) return;
     root.querySelectorAll('.maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right').forEach((el) => {
-      el.style.bottom = fill ? '16.5rem' : '0px';
+      el.style.bottom = fullscreen ? '18rem' : '0px';
     });
     root.querySelectorAll('.maplibregl-ctrl-attrib').forEach((el) => {
       el.style.fontSize = '10px';
       el.style.maxWidth = '70vw';
       el.style.whiteSpace = 'normal';
     });
-  }, [fill, mapReady, size.height]);
+  }, [fullscreen, mapReady, size.height]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1046,6 +1093,7 @@ export default function SatelliteHoleMap({
     setSourceData(map, 'hole-greens', polygonsFor(features, 'green'));
     setSourceData(map, 'hole-bunkers', polygonsFor(features, 'bunker'));
     setSourceData(map, 'hole-water', polygonsFor(features, 'water'));
+    setSourceData(map, 'hole-centerlines', linesFor(features, 'hole'));
     applyBasemapMode(map, mode === 'schematic', bgRestoreRef.current);
   }, [mapReady, features, mode]);
 
@@ -1061,15 +1109,18 @@ export default function SatelliteHoleMap({
     const map = mapRef.current;
     if (!mapReady || !map || !playing.tee || !playing.green) return;
     if (size.width < 40 || size.height < 40) return;
-    const bearing = bearingBetween(lie || playing.tee, playing.green);
-    const frameId = `${holeKey}|${teeKey}|${greenKey}|${fill ? 'fill' : 'card'}`;
+    const separated = Boolean(playing.tee && playing.green && haversineMeters(playing.tee, playing.green) > 8);
+    const bearing = separated
+      ? bearingBetween(lie || playing.tee, playing.green)
+      : (Number.isFinite(cardBearing) ? cardBearing : 0);
+    const frameId = `${holeKey}|${teeKey}|${greenKey}|${fullscreen ? 'fill' : 'card'}`;
     safeResize(map);
     if (framedRef.current !== frameId) {
       framedRef.current = frameId;
       aimRef.current = aimKey;
-      const separated = haversineMeters(playing.tee, playing.green) > 8;
       if (!separated) {
-        map.easeTo({ center: [playing.green.lon, playing.green.lat], zoom: 17, bearing, pitch: 0, duration: 500 });
+        const center = isDosLagosCourse(courseName) ? DOS_LAGOS : (playing.green || anchor);
+        map.easeTo({ center: [center.lon, center.lat], zoom: 16, bearing, pitch: 0, duration: 700 });
       } else {
         const bounds = new maplibregl.LngLatBounds(
           [playing.tee.lon, playing.tee.lat],
@@ -1080,9 +1131,7 @@ export default function SatelliteHoleMap({
           pitch: 0,
           maxZoom: 18,
           duration: 700,
-          padding: fill
-            ? { top: 108, bottom: 268, left: 40, right: 64 }
-            : { top: 64, bottom: 56, left: 32, right: 52 },
+          padding: fullscreen ? ROUND_FIT_PADDING : { top: 64, bottom: 56, left: 32, right: 52 },
         });
       }
       return;
@@ -1091,7 +1140,7 @@ export default function SatelliteHoleMap({
       aimRef.current = aimKey;
       map.easeTo({ bearing, pitch: 0, duration: 350 });
     }
-  }, [mapReady, holeKey, teeKey, greenKey, aimKey, fill, size.width, size.height, lie, playing.tee, playing.green]);
+  }, [mapReady, holeKey, teeKey, greenKey, aimKey, fullscreen, size.width, size.height, lie, playing.tee, playing.green, playing.surveyed, cardBearing, courseName, anchor]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1259,17 +1308,17 @@ export default function SatelliteHoleMap({
     ? `Hole ${holeNum}${hole?.par ? ` · Par ${hole.par}` : ''}`
     : 'Hole map';
   const originLabel = validPoint(gpsOrigin) ? 'From GPS' : validPoint(origin) ? 'From lie' : 'From tee';
-  const controlBottom = fill ? '16.5rem' : '2.25rem';
+  const controlBottom = fullscreen ? '18rem' : '2.25rem';
 
   return (
     <section
-      className={fill
+      className={fullscreen
         ? 'fixed inset-0 z-40 h-[100dvh] w-screen overflow-hidden bg-[#0B0D0C]'
         : 'relative w-full max-w-md overflow-hidden rounded-2xl border'}
-      style={fill ? undefined : { backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
+      style={fullscreen ? undefined : { backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
       aria-label="Satellite hole map"
     >
-      {!fill && (
+      {!fullscreen && (
         <div className="flex shrink-0 items-start justify-between gap-2 px-3 pb-2 pt-3">
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold">{courseName || 'Satellite hole map'}</div>
@@ -1278,16 +1327,17 @@ export default function SatelliteHoleMap({
         </div>
       )}
 
-      <div
-        ref={mapElRef}
-        className={fill ? 'h-full w-full' : 'relative h-[320px] w-full'}
-        style={{ backgroundColor: '#0B0D0C' }}
-      />
+      <div className={fullscreen ? 'relative h-full w-full' : 'relative h-[320px] w-full'}>
+        <div
+          ref={mapElRef}
+          className="h-full w-full"
+          style={{ backgroundColor: '#0B0D0C' }}
+        />
 
       <div className="pointer-events-none absolute inset-0 z-20">
         <div
           className="pointer-events-none absolute left-1/2 flex -translate-x-1/2 gap-1.5"
-          style={{ top: fill ? '4.75rem' : '0.5rem' }}
+          style={{ top: fullscreen ? '4.75rem' : '0.5rem' }}
         >
           {[
             ['Back', backYards, false],
@@ -1308,7 +1358,7 @@ export default function SatelliteHoleMap({
           ))}
         </div>
 
-        <div className="absolute right-2 flex flex-col gap-1.5" style={{ top: fill ? '4.75rem' : '0.5rem' }}>
+        <div className="absolute right-2 flex flex-col gap-1.5" style={{ top: fullscreen ? '4.75rem' : '0.5rem' }}>
           <div className="pointer-events-auto flex overflow-hidden rounded-full border border-white/20 bg-[#0B0D0C]/75 backdrop-blur-md">
             <button
               type="button"
@@ -1352,7 +1402,7 @@ export default function SatelliteHoleMap({
           >
             Mark Today&apos;s Pin
           </button>
-          {fill && (
+          {fullscreen && (
             <button
               type="button"
               onClick={useMyGps}
@@ -1375,8 +1425,9 @@ export default function SatelliteHoleMap({
         )}
         <p className="sr-only">{featureStatus}. {clubName ? `${clubName} to target.` : ''}</p>
       </div>
+      </div>
 
-      {!fill && (
+      {!fullscreen && (
         <div className="flex shrink-0 items-center justify-between gap-3 px-3 py-2.5">
           <div className="min-w-0">
             <div className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>To pin</div>
@@ -1398,11 +1449,11 @@ export default function SatelliteHoleMap({
         </div>
       )}
 
-      {!fill && (
+      {!fullscreen && (
         <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 px-3 pb-3 text-[10px]" style={{ color: 'var(--text-secondary)' }}>
           <span className="inline-flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-sm bg-[#10B981]" />Fairway</span>
           <span className="inline-flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-sm bg-[#10B981]" />Green</span>
-          <span className="inline-flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-sm" style={{ background: '#E6D2A1' }} />Bunker</span>
+          <span className="inline-flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-sm" style={{ background: '#D4AF37' }} />Bunker</span>
           <span className="inline-flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-sm bg-sky-400" />Water</span>
           <span className="truncate">{featureStatus}</span>
         </div>

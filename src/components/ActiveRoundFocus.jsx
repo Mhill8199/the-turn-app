@@ -73,6 +73,7 @@ export default function ActiveRoundFocus({
   fallbackClubName = '',
   fallbackCarryYards = null,
   suggestion = '',
+  crewLabel = '',
   children,
 }) {
   const { distanceUnit, toggleDistanceUnit, speedUnit } = useUnits();
@@ -122,12 +123,13 @@ export default function ActiveRoundFocus({
 
   return (
     <div
-      className="fixed inset-0 z-40 flex h-[100dvh] w-screen flex-col"
+      className="fixed inset-0 z-40 h-[100dvh] w-screen"
       style={{ backgroundColor: night ? '#0B0D0C' : '#F6F5F0', color: 'var(--text-primary)' }}
     >
-      <div className="mx-auto flex h-full min-h-0 w-full max-w-md flex-col">
+      <div className="absolute inset-0 z-40">{children}</div>
+      <div className="pointer-events-none relative z-50 mx-auto flex h-full min-h-0 w-full max-w-md flex-col">
         <header
-          className="relative z-50 flex shrink-0 items-center gap-1.5 border-b px-2 py-1.5"
+          className="pointer-events-auto relative z-50 flex shrink-0 items-center gap-1.5 border-b px-2 py-1.5"
           style={{ borderColor: 'var(--border-subtle)', backgroundColor: night ? '#0B0D0C' : '#FFFFFF' }}
         >
           <button
@@ -186,9 +188,9 @@ export default function ActiveRoundFocus({
           </button>
         </header>
 
-        <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+        <div className="min-h-0 flex-1" />
 
-        <div className="relative z-50 shrink-0 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2">
+        <div className="pointer-events-auto relative z-50 shrink-0 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2">
           <div className="space-y-2 rounded-3xl border bg-[#0B0D0C] p-3 text-white">
             <div className="flex items-end justify-between gap-3">
               <div>
@@ -234,6 +236,11 @@ export default function ActiveRoundFocus({
               </div>
             </div>
 
+            {crewLabel ? (
+              <div className="truncate text-[11px] font-semibold" style={{ color: '#D4AF37' }}>
+                Foursome · {crewLabel}
+              </div>
+            ) : null}
             <div className="flex min-h-[44px] items-center gap-2 rounded-2xl border border-[#10B981]/50 px-2 py-1">
               <div className="min-w-0 flex-1">
                 <div className="text-[10px] font-semibold uppercase tracking-wider text-[#10B981]">Shot Suggestion</div>

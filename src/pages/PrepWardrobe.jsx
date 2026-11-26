@@ -1,4 +1,5 @@
 ﻿import { useState, useEffect } from 'react';
+import RoundWarmupModal from '../components/RoundWarmupModal';
 import { Sparkles, Sliders, Image, Palette, Lock, RefreshCw, Check, Plus, Luggage } from 'lucide-react';
 import AddClosetModal from '../components/AddClosetModal';
 import WardrobeFlatLay from '../components/WardrobeFlatLay';
@@ -39,6 +40,7 @@ export default function PrepWardrobe({ isPro = false, onOpenPaywall }) {
   const [lockedIn, setLockedIn] = useState(false);
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [prepSurface, setPrepSurface] = useState('wardrobe');
+  const [warmupOpen, setWarmupOpen] = useState(false);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -113,7 +115,21 @@ export default function PrepWardrobe({ isPro = false, onOpenPaywall }) {
   const tripShoes = closet.filter((i) => i.category === 'shoes').slice(0, 2);
 
   return (
-    <div className="space-y-4 pb-24">
+    <div className="space-y-4 pb-[max(6rem,env(safe-area-inset-bottom))]">
+      <div className="flex items-center justify-between gap-3 rounded-3xl border p-4" style={{ backgroundColor: '#0B0D0C', borderColor: '#D4AF37' }}>
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: '#D4AF37' }}>Pre-round</div>
+          <div className="text-sm font-semibold text-white">12-minute routine from your logged rounds</div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setWarmupOpen(true)}
+          className="min-h-[44px] shrink-0 rounded-full px-4 text-sm font-semibold"
+          style={{ color: '#D4AF37', border: '1px solid #D4AF37', backgroundColor: '#0B0D0C' }}
+        >
+          Round Warm-Up
+        </button>
+      </div>
       <div className="grid grid-cols-2 gap-2" role="tablist" aria-label="Prep mode">
         <button
           type="button"
@@ -345,6 +361,7 @@ export default function PrepWardrobe({ isPro = false, onOpenPaywall }) {
       <WardrobeFlatLay onLockOutfit={handleLockOutfit} />
       </>
       )}
+      <RoundWarmupModal open={warmupOpen} onClose={() => setWarmupOpen(false)} />
     </div>
   );
 }
