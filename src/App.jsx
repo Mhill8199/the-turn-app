@@ -254,7 +254,7 @@ const handleStartCheckout = async () => {
   }
 
   const studentPassActive = Boolean(studentPass?.verified) && Boolean(studentPass?.expiresAt) && new Date(studentPass.expiresAt) > new Date();
-  const isPro = profile?.tier === 'tour_pro' || demoPro || studentPassActive;
+  const isPro = profile?.tier === 'tour_pro' || demoPro || studentPassActive || profile?.is_beta_tester === true;
   const leadClub = clubs[1] || clubs[0];
 
   return (
@@ -619,7 +619,11 @@ const handleStartCheckout = async () => {
         </div>
       )}
 
-      <BetaGateAndFeedback activeTab={activeTab} holeNumber={activeTab === 'course' ? courseHole : null} />
+      <BetaGateAndFeedback
+        activeTab={activeTab}
+        holeNumber={activeTab === 'course' ? courseHole : null}
+        onRequireAuth={() => setAuthOpen(true)}
+      />
 
       <nav
         className="app-bottom-nav sticky bottom-0 z-20 border-t px-2 pt-2 pb-[env(safe-area-inset-bottom)] grid grid-cols-4 gap-1 backdrop-blur-md"
