@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Wind,
   Droplets,
@@ -25,9 +25,16 @@ import {
   fetchCourseWeather,
   fetchElevationFt,
   searchNearbyGolfCourses,
+  cacheSelectedCourse,
+  readCachedCourses,
   degreesToCompass,
   calculateShotPhysics,
 } from '../lib/weatherPhysics';
+import SatelliteHoleMap from '../components/SatelliteHoleMap';
+import ActiveRoundFocus from '../components/ActiveRoundFocus';
+import { useUnits } from '../utils/distanceUnits';
+import { useLanguage } from '../i18n/LanguageContext';
+import { buildWearablePayload, resolveTtsLocale, speakCaddieCallout } from '../utils/wearableAndAudioCaddie';
 
 const CUSTOM_COURSES_KEY = 'the-turn-custom-courses';
 const SCORES_KEY = 'the-turn-scores-v2';
@@ -95,7 +102,11 @@ function buildSatelliteTileGrid(lat, lon, zoom = 16) {
   return tiles;
 }
 
-export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall, onOpenWearable }) {
+export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall, onOpenWearable, onActiveHole }) {
+  const { distanceUnit, formatDistance, formatSpeed } = useUnits();
+  const { lang } = useLanguage();
+  const [caddiePayload, setCaddiePayload] = useState(null);
+  const caddieHoleArmed = useRef(false);
   const [customCourses, setCustomCourses] = useState(() => {
     try {
       const saved = localStorage.getItem(CUSTOM_COURSES_KEY);
@@ -164,6 +175,11 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   const [greenSlope, setGreenSlope] = useState('Back-to-Front');
   const [holeNote, setHoleNote] = useState('');
 
+  const [isRoundActive, setIsRoundActive] = useState(false);
+  const [pinTarget, setPinTarget] = useState(null);
+  const roundActiveRef = useRef(false);
+  roundActiveRef.current = isRoundActive;
+
   const [weather, setWeather] = useState({
     tempF: 68,
     dewPointF: 52,
@@ -179,6 +195,20 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   }, [customCourses]);
 
   useEffect(() => {
+    if (typeof navigator !== 'undefined' && navigator.onLine !== false) return undefined;
+    let cancelled = false;
+    readCachedCourses().then((courses) => {
+      if (cancelled || !Array.isArray(courses) || courses.length === 0) return;
+      setCustomCourses((prev) => {
+        const ids = new Set(prev.map((course) => course.id));
+        const extra = courses.filter((course) => course?.id && !ids.has(course.id));
+        return extra.length ? [...extra, ...prev] : prev;
+      });
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
     localStorage.setItem(SCORES_KEY, JSON.stringify(scores));
   }, [scores]);
 
@@ -187,6 +217,10 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   }, [missPins]);
 
   const activeCourse = allCourses.find((c) => c.id === courseId) || allCourses[0] || COURSE_PRESETS[0];
+
+  useEffect(() => {
+    cacheSelectedCourse(activeCourse);
+  }, [activeCourse]);
   const baseHole = activeCourse.holes[holeIdx] || activeCourse.holes[0];
   const activeTee = TEE_BOXES.find((t) => t.id === teeId) || TEE_BOXES[1];
 
@@ -201,6 +235,14 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
     bunkerEnd: baseHole.bunkerEnd ? Math.round(baseHole.bunkerEnd * activeTee.mult) : null,
     waterCarry: baseHole.waterCarry ? Math.round(baseHole.waterCarry * activeTee.mult) : null,
   };
+
+  useEffect(() => {
+    onActiveHole?.(activeHole.number);
+  }, [activeHole.number, onActiveHole]);
+
+  useEffect(() => {
+    setPinTarget(null);
+  }, [activeCourse.id, activeHole.number, teeId]);
 
   useEffect(() => {
     setHoleNumber((activeCourse.holes?.length || 0) + 1);
@@ -462,8 +504,8 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   const aimAdvice =
     crossYards >= 2
       ? activeClub.crosswindMph > 0
-        ? `Aim ${crossYards}y Right (R->L wind)`
-        : `Aim ${crossYards}y Left (L->R wind)`
+        ? `Aim ${formatDistance(crossYards)} Right (R->L wind)`
+        : `Aim ${formatDistance(crossYards)} Left (L->R wind)`
       : 'Aim Center (Neutral crosswind)';
 
   const dewSpread = weather.tempF - weather.dewPointF;
@@ -587,10 +629,123 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   const shapeShiftX = activeClub?.shot_shape === 'Fade' ? 14 : activeClub?.shot_shape === 'Draw' ? -14 : 0;
   const satTiles = buildSatelliteTileGrid(activeCourse.lat, activeCourse.lon, satZoom);
   const showRealSat = useSatTiles && !tileError;
+  const caddieUnit = distanceUnit === 'm' ? 'm' : 'yds';
+  const ttsLocale = resolveTtsLocale(lang);
+  const caddieClub = bestClub?.club_type || 'Club';
+  const caddieYards = Number(bestClub?.effectiveCarry ?? activeHole.yards) || 0;
+
+  useEffect(() => {
+    setCaddiePayload(buildWearablePayload({
+      unit: caddieUnit,
+      targetYards: caddieYards,
+      playsLikeYards: caddieYards,
+      club: caddieClub,
+      holeNumber: activeHole.number,
+      par: activeHole.par,
+      wind: aimAdvice,
+      courseName: activeCourse.name,
+      ttsLocale,
+    }));
+  }, [caddieUnit, caddieYards, caddieClub, activeHole.number, activeHole.par, aimAdvice, activeCourse.name, ttsLocale]);
+
+  useEffect(() => {
+    if (!caddieHoleArmed.current) {
+      caddieHoleArmed.current = true;
+      return;
+    }
+    const payload = buildWearablePayload({
+      unit: caddieUnit,
+      targetYards: caddieYards,
+      playsLikeYards: caddieYards,
+      club: caddieClub,
+      holeNumber: activeHole.number,
+      par: activeHole.par,
+      wind: aimAdvice,
+      courseName: activeCourse.name,
+      ttsLocale,
+    });
+    setCaddiePayload(payload);
+    if (roundActiveRef.current) return;
+    speakCaddieCallout(
+      { holeNumber: activeHole.number, club: caddieClub, targetYards: caddieYards, wind: aimAdvice },
+      caddieUnit,
+      ttsLocale
+    );
+  }, [activeHole.number]);
+
+  const playCaddieCallout = () => {
+    const payload = buildWearablePayload({
+      unit: caddieUnit,
+      targetYards: caddieYards,
+      playsLikeYards: caddieYards,
+      club: caddieClub,
+      holeNumber: activeHole.number,
+      par: activeHole.par,
+      wind: aimAdvice,
+      courseName: activeCourse.name,
+      ttsLocale,
+    });
+    setCaddiePayload(payload);
+    speakCaddieCallout(
+      { holeNumber: activeHole.number, club: caddieClub, targetYards: caddieYards, wind: aimAdvice },
+      caddieUnit,
+      ttsLocale
+    );
+  };
+
+  if (isRoundActive) {
+    const targetYards = Number.isFinite(Number(pinTarget?.yards)) ? Number(pinTarget.yards) : activeHole.yards;
+    return (
+      <ActiveRoundFocus
+        holeNumber={activeHole.number}
+        par={activeHole.par}
+        canPrev={holeIdx > 0}
+        canNext={holeIdx < (activeCourse.holes?.length || 1) - 1}
+        onPrev={() => setHoleIdx((idx) => Math.max(0, idx - 1))}
+        onNext={() => setHoleIdx((idx) => Math.min((activeCourse.holes?.length || 1) - 1, idx + 1))}
+        onEndRound={() => {
+          setPinTarget(null);
+          setIsRoundActive(false);
+        }}
+        centerYards={targetYards}
+        pinYards={targetYards}
+        windSpeedMph={weather?.windSpeedMph}
+        windDirDeg={weather?.windDirDeg}
+        holeBearingDeg={activeHole.bearingDeg}
+        clubs={clubs}
+        suggestion={activeHole.note || aimAdvice}
+      >
+        <SatelliteHoleMap
+          fill
+          courseName={activeCourse.name}
+          center={{ lat: activeCourse.lat, lon: activeCourse.lon }}
+          hole={{
+            number: activeHole.number,
+            par: activeHole.par,
+            lat: activeHole.lat,
+            lon: activeHole.lon,
+          }}
+          origin={shotStartGps ? { lat: shotStartGps.lat, lon: shotStartGps.lon } : undefined}
+          onPinChange={setPinTarget}
+        />
+      </ActiveRoundFocus>
+    );
+  }
 
   return (
     <div className="space-y-4 pb-24">
       <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
+        <button
+          type="button"
+          onClick={() => {
+            setPinTarget(null);
+            setIsRoundActive(true);
+          }}
+          className="w-full min-h-[44px] rounded-2xl text-sm font-semibold text-white"
+          style={{ backgroundColor: 'var(--accent-emerald)' }}
+        >
+          Start Round
+        </button>
         <form onSubmit={handleCourseDirectorySearch} className="flex items-center gap-1.5">
           <div className="relative flex-1">
             <Search size={13} className="absolute left-3 top-2.5 opacity-55" />
@@ -686,12 +841,12 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
             <button
               key={`${activeCourse.id}-${h.number}-${idx}`}
               onClick={() => setHoleIdx(idx)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-mono font-semibold border shrink-0 transition ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-mono font-semibold border shrink-0 transition tabular-nums ${
                 holeIdx === idx ? 'bg-emerald-700 text-white border-emerald-700' : ''
               }`}
               style={holeIdx !== idx ? { borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' } : {}}
             >
-              #{h.number} - P{h.par} ({Math.round(h.yards * activeTee.mult)}y)
+              #{h.number} - P{h.par} ({formatDistance(Math.round(h.yards * activeTee.mult))})
             </button>
           ))}
         </div>
@@ -736,7 +891,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               />
             </div>
             <div>
-              <label className="text-[10px] block mb-0.5" style={{ color: 'var(--text-secondary)' }}>Wind ({weather.windSpeedMph} mph)</label>
+              <label className="text-[10px] block mb-0.5 tabular-nums" style={{ color: 'var(--text-secondary)' }}>Wind ({formatSpeed(weather.windSpeedMph)})</label>
               <input
                 type="range"
                 min="0"
@@ -941,25 +1096,25 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
       <div className="grid grid-cols-4 gap-2">
         <div className="rounded-xl p-2.5 border text-center" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
           <Thermometer size={14} className="mx-auto mb-1" style={{ color: 'var(--accent-emerald)' }} />
-          <div className="font-mono font-bold text-sm">{weather.tempF}F</div>
+          <div className="font-mono font-bold text-sm tabular-nums">{weather.tempF}F</div>
           <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Temp</div>
         </div>
 
         <div className="rounded-xl p-2.5 border text-center" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
           <Droplets size={14} className="mx-auto mb-1 text-sky-400" />
-          <div className="font-mono font-bold text-sm">{weather.dewPointF}F</div>
+          <div className="font-mono font-bold text-sm tabular-nums">{weather.dewPointF}F</div>
           <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Dew Pt</div>
         </div>
 
         <div className="rounded-xl p-2.5 border text-center" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
           <Wind size={14} className="mx-auto mb-1" style={{ color: 'var(--accent-gold)' }} />
-          <div className="font-mono font-bold text-sm">{weather.windSpeedMph} mph</div>
-          <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>{degreesToCompass(weather.windDirDeg)} (G{weather.windGustMph})</div>
+          <div className="font-mono font-bold text-sm tabular-nums">{formatSpeed(weather.windSpeedMph)}</div>
+          <div className="text-[10px] tabular-nums" style={{ color: 'var(--text-secondary)' }}>{degreesToCompass(weather.windDirDeg)} (G {formatSpeed(weather.windGustMph)})</div>
         </div>
 
         <div className="rounded-xl p-2.5 border text-center" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
           <Mountain size={14} className="mx-auto mb-1 opacity-75" />
-          <div className="font-mono font-bold text-sm">{activeCourse.elevationFt} ft</div>
+          <div className="font-mono font-bold text-sm tabular-nums">{activeCourse.elevationFt} ft</div>
           <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Elev</div>
         </div>
       </div>
@@ -974,11 +1129,11 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
             <div className="text-[11px] font-semibold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--accent-emerald)' }}>
               <Sparkles size={13} /> Highest-Percentage Play ({activeTee.label} Tees)
             </div>
-            <div className="font-bold text-sm">
-              Pull {bestClub.club_type} ({bestClub.effectiveCarry}y carry / {bestClub.effectiveTotal}y total)
+            <div className="font-bold text-sm tabular-nums">
+              Pull {bestClub.club_type} ({formatDistance(bestClub.effectiveCarry)} carry / {formatDistance(bestClub.effectiveTotal)} total)
             </div>
             <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-              {aimAdvice} - {activeHole.par === 3 ? `Green: ${activeHole.greenSlope}` : `Leaves ${bestClub.remainingToPin}y in`}
+              {aimAdvice} - {activeHole.par === 3 ? `Green: ${activeHole.greenSlope}` : `Leaves ${formatDistance(bestClub.remainingToPin)} in`}
             </div>
           </div>
           <CheckCircle2 size={20} style={{ color: 'var(--accent-emerald)' }} className="shrink-0" />
@@ -989,8 +1144,8 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
       {activeClub && (
         <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
           <div className="flex items-center justify-between gap-2 text-xs">
-            <span className="font-semibold truncate">
-              Hole #{activeHole.number} - Par {activeHole.par} - {activeHole.yards} yds
+            <span className="font-semibold truncate tabular-nums">
+              Hole #{activeHole.number} - Par {activeHole.par} - {formatDistance(activeHole.yards)}
             </span>
             <div className="flex items-center gap-1.5 shrink-0">
               <button
@@ -1023,7 +1178,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
                 </div>
               )}
               <span className="font-mono" style={{ color: 'var(--accent-gold)' }}>
-                {activeClub.headwindMph >= 0 ? `${activeClub.headwindMph} mph Into` : `${Math.abs(activeClub.headwindMph)} mph Helping`}
+                {activeClub.headwindMph >= 0 ? `${formatSpeed(activeClub.headwindMph)} Into` : `${formatSpeed(Math.abs(activeClub.headwindMph))} Helping`}
               </span>
             </div>
           </div>
@@ -1052,6 +1207,35 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
                 </button>
               )}
             </div>
+          </div>
+
+          {/* OSM satellite hole map — imagery, schematic, and tap-to-pin. Existing hole diagram stays below. */}
+          <SatelliteHoleMap
+            courseName={activeCourse.name}
+            center={{ lat: activeCourse.lat, lon: activeCourse.lon }}
+            hole={{
+              number: activeHole.number,
+              par: activeHole.par,
+              lat: activeHole.lat,
+              lon: activeHole.lon,
+            }}
+            origin={shotStartGps ? { lat: shotStartGps.lat, lon: shotStartGps.lon } : undefined}
+          />
+
+          <div className="space-y-1.5">
+            <button
+              type="button"
+              onClick={playCaddieCallout}
+              className="w-full min-h-[44px] rounded-xl text-sm font-semibold text-white"
+              style={{ backgroundColor: 'var(--accent-emerald)' }}
+            >
+              Play caddie callout
+            </button>
+            {caddiePayload?.glasses?.meta?.glance && (
+              <p className="text-[11px] font-mono" style={{ color: 'var(--text-secondary)' }}>
+                {caddiePayload.liveActivity?.title} · {caddiePayload.glasses.meta.glance}
+              </p>
+            )}
           </div>
 
           <svg
@@ -1167,7 +1351,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
                   <line x1="108" y1={waterY - 1} x2="132" y2={waterY - 2} stroke="#BAE6FD" strokeOpacity="0.55" strokeWidth="1" />
                   <line x1="148" y1={waterY + 3} x2="174" y2={waterY + 2} stroke="#BAE6FD" strokeOpacity="0.45" strokeWidth="1" />
                   <text x="200" y={waterY + 3} fontSize="8" fontWeight="bold" fill="#7DD3FC">
-                    H2O {activeHole.waterCarry}y
+                    H2O {formatDistance(activeHole.waterCarry)}
                   </text>
                 </g>
               );
@@ -1188,7 +1372,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
                     strokeWidth="1.2"
                   />
                   <text x="185" y={bY + 3} fontSize="8" fontWeight="bold" fill="#FDE68A">
-                    Sand {activeHole.bunkerStart}y
+                    Sand {formatDistance(activeHole.bunkerStart)}
                   </text>
                 </g>
               );
@@ -1208,7 +1392,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
             </g>
             <rect x="178" y="34" width="48" height="14" rx="4" fill="#060D09" fillOpacity="0.82" stroke="#6EE7B7" strokeOpacity="0.4" strokeWidth="0.8" />
             <text x="202" y="43.5" textAnchor="middle" fontSize="8.5" fontWeight="bold" fill="#FFFFFF">
-              {activeHole.yards}y PIN
+              {formatDistance(activeHole.yards)} PIN
             </text>
 
             {currentHolePins.map((pin) => (
@@ -1258,7 +1442,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
                     fillOpacity="0.85"
                   />
                   <text x={Math.min(164, landX + 11)} y={carryY + 3} fontSize="8.5" fontWeight="bold" fill={strokeCol}>
-                    {activeClub.club_type}: {activeClub.effectiveCarry}y
+                    {activeClub.club_type}: {formatDistance(activeClub.effectiveCarry)}
                   </text>
                 </>
               );
@@ -1298,7 +1482,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
                 <polygon points="0,-12 -4,-5 4,-5" fill="#FBBF24" />
               </g>
               <text x="0" y="28" textAnchor="middle" fontSize="8" fontWeight="bold" fill="#FFFFFF">
-                {degreesToCompass(weather.windDirDeg)} {weather.windSpeedMph}mph
+                {degreesToCompass(weather.windDirDeg)} {formatSpeed(weather.windSpeedMph)}
               </text>
             </g>
 
@@ -1313,10 +1497,10 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
           {pairedApproachClub && (
             <div className="p-2.5 rounded-xl border text-xs flex items-center justify-between" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
               <span>
-                <strong>2-Shot Combo:</strong> {activeClub.club_type} ({activeClub.effectiveTotal}y) -&gt; <strong>{pairedApproachClub.club_type}</strong> ({activeClub.remainingToPin}y in)
+                <strong>2-Shot Combo:</strong> {activeClub.club_type} ({formatDistance(activeClub.effectiveTotal)}) -&gt; <strong>{pairedApproachClub.club_type}</strong> ({formatDistance(activeClub.remainingToPin)} in)
               </span>
-              <span className="font-mono text-[11px]" style={{ color: 'var(--accent-emerald)' }}>
-                {pairedApproachClub.effectiveCarry}y carry
+              <span className="font-mono text-[11px] tabular-nums" style={{ color: 'var(--accent-emerald)' }}>
+                {formatDistance(pairedApproachClub.effectiveCarry)} carry
               </span>
             </div>
           )}
@@ -1338,14 +1522,14 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
                 style={activeClub.id !== club.id ? { borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' } : {}}
               >
                 <div>{club.club_type}</div>
-                <div className="text-[10px] font-mono opacity-80">Stock {club.carry_yards}y -&gt; {club.effectiveCarry}y</div>
+                <div className="text-[10px] font-mono opacity-80 tabular-nums">Stock {formatDistance(club.carry_yards)} -&gt; {formatDistance(club.effectiveCarry)}</div>
               </button>
             ))}
           </div>
 
           {(activeClub.hitsBunker || !activeClub.missesWater) && (
             <div className="text-xs text-red-400 font-medium flex items-center gap-1.5">
-              <AlertTriangle size={14} /> Hazard Alert: Adjusted carry ({activeClub.effectiveCarry}y) brings trouble into play.
+              <AlertTriangle size={14} /> Hazard Alert: Adjusted carry ({formatDistance(activeClub.effectiveCarry)}) brings trouble into play.
             </div>
           )}
 
@@ -1362,8 +1546,8 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
             <LocateFixed size={14} /> Live GPS Shot Yardage Tracker
           </span>
           {(lastMeasuredShot || currentStat.driveYards) && (
-            <span className="text-xs font-mono font-bold" style={{ color: 'var(--accent-emerald)' }}>
-              {lastMeasuredShot ? `${lastMeasuredShot.club}: ${lastMeasuredShot.yards}y` : `Logged: ${currentStat.driveYards}y`}
+            <span className="text-xs font-mono font-bold tabular-nums" style={{ color: 'var(--accent-emerald)' }}>
+              {lastMeasuredShot ? `${lastMeasuredShot.club}: ${formatDistance(lastMeasuredShot.yards)}` : `Logged: ${formatDistance(currentStat.driveYards)}`}
             </span>
           )}
         </div>
@@ -1406,7 +1590,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               GIR auto-detects when (Strokes - Putts) &le; {activeHole.par - 2}
             </div>
           </div>
-          <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-full" style={{ backgroundColor: 'var(--bg-elevated)', color: 'var(--accent-gold)' }}>
+          <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-full tabular-nums" style={{ backgroundColor: 'var(--bg-elevated)', color: 'var(--accent-gold)' }}>
             {holesLogged > 0 ? `${totalStrokes} (${relPar === 0 ? 'E' : relPar > 0 ? `+${relPar}` : relPar})` : 'Ready'}
           </span>
         </div>
@@ -1424,7 +1608,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               >
                 -
               </button>
-              <span className="w-5 text-center font-mono font-bold text-base">{currentStat.strokes}</span>
+              <span className="w-5 text-center font-mono font-bold text-base tabular-nums">{currentStat.strokes}</span>
               <button
                 type="button"
                 onClick={() => updateHoleStat({ strokes: currentStat.strokes + 1 })}
@@ -1447,7 +1631,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               >
                 -
               </button>
-              <span className="w-5 text-center font-mono font-bold text-base">{currentStat.putts}</span>
+              <span className="w-5 text-center font-mono font-bold text-base tabular-nums">{currentStat.putts}</span>
               <button
                 type="button"
                 onClick={() => updateHoleStat({ putts: currentStat.putts + 1 })}
@@ -1524,10 +1708,10 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         </div>
 
         {/* Live Round Totals Strip */}
-        <div className="grid grid-cols-4 gap-1.5 pt-1 text-center text-xs">
+        <div className="grid grid-cols-4 gap-1.5 pt-1 text-center text-xs" data-numeric>
           <div className="p-2 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
             <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Strokes</div>
-            <div className="font-mono font-bold">{holesLogged > 0 ? totalStrokes : '-'}</div>
+            <div className="font-mono font-bold tabular-nums">{holesLogged > 0 ? totalStrokes : '-'}</div>
           </div>
           <div className="p-2 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
             <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>FIR</div>
@@ -1539,7 +1723,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
           </div>
           <div className="p-2 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
             <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Putts</div>
-            <div className="font-mono font-bold">{holesLogged > 0 ? totalPutts : '-'}</div>
+            <div className="font-mono font-bold tabular-nums">{holesLogged > 0 ? totalPutts : '-'}</div>
           </div>
         </div>
       </div>
@@ -1555,15 +1739,15 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         <div className="grid grid-cols-3 gap-2 text-center">
           <div className="p-2 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
             <div className="text-[10px] uppercase" style={{ color: 'var(--text-secondary)' }}>Front</div>
-            <div className="font-mono font-bold text-sm">{frontYards}y</div>
+            <div className="font-mono font-bold text-sm tabular-nums">{formatDistance(frontYards)}</div>
           </div>
           <div className="p-2 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--accent-emerald)' }}>
             <div className="text-[10px] uppercase" style={{ color: 'var(--accent-emerald)' }}>Middle</div>
-            <div className="font-mono font-bold text-sm">{activeHole.yards}y</div>
+            <div className="font-mono font-bold text-sm tabular-nums">{formatDistance(activeHole.yards)}</div>
           </div>
           <div className="p-2 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
             <div className="text-[10px] uppercase" style={{ color: 'var(--text-secondary)' }}>Back</div>
-            <div className="font-mono font-bold text-sm">{backYards}y</div>
+            <div className="font-mono font-bold text-sm tabular-nums">{formatDistance(backYards)}</div>
           </div>
         </div>
       </div>
@@ -1577,7 +1761,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         <div className="flex items-center gap-2 text-xs">
           <Watch size={15} style={{ color: 'var(--accent-gold)' }} />
           <Glasses size={15} style={{ color: 'var(--accent-gold)' }} />
-          <span>Watch & Meta Glasses Feed: <strong>{bestClub?.club_type} ({bestClub?.effectiveCarry}y)</strong></span>
+          <span>Watch & Meta Glasses Feed: <strong className="tabular-nums">{bestClub?.club_type} ({formatDistance(bestClub?.effectiveCarry)})</strong></span>
         </div>
         <span className="text-[11px] font-semibold underline" style={{ color: 'var(--accent-gold)' }}>Preview HUD</span>
       </button>

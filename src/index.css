@@ -4,11 +4,15 @@
   --bg-canvas: #F6F5F0;
   --bg-surface: #FFFFFF;
   --bg-elevated: #ECEAE2;
-  --border-subtle: #DCD8CC;
+  /* Daylight borders stay readable through polarized sunglasses. */
+  --border-subtle: rgba(20, 24, 22, 0.72);
   --text-primary: #141816;
   --text-secondary: #555E59;
-  --accent-emerald: #175B3F;
+  /* #10B981 fails WCAG on white (~2.5:1). Keep a darker emerald for text and white-on-fill buttons. */
+  --accent-emerald: #12724A;
+  --accent-emerald-fill: #10B981;
   --accent-gold: #9E7B34;
+  --accent-gold-pro: #D4AF37;
 }
 
 .dark {
@@ -18,8 +22,11 @@
   --border-subtle: #2B352F;
   --text-primary: #F3F4F1;
   --text-secondary: #97A39C;
-  --accent-emerald: #23865D;
+  /* #10B981 clears the dark canvas. Fills and icons use the same stop. */
+  --accent-emerald: #10B981;
+  --accent-emerald-fill: #10B981;
   --accent-gold: #C8A96A;
+  --accent-gold-pro: #D4AF37;
 }
 
 body {
@@ -27,4 +34,62 @@ body {
   color: var(--text-primary);
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.tabular-nums,
+[data-numeric],
+[data-numeric] * {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+/* Light theme only: ThemeContext adds .dark on documentElement. */
+html:not(.dark) .daylight-border,
+html:not(.dark) .rounded-2xl,
+html:not(.dark) .rounded-3xl,
+html:not(.dark) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]),
+html:not(.dark) textarea,
+html:not(.dark) select {
+  border-width: 2px;
+}
+
+html:not(.dark) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]),
+html:not(.dark) textarea,
+html:not(.dark) select,
+html:not(.dark) .daylight-border {
+  border-style: solid;
+  border-color: rgba(20, 24, 22, 0.78);
+}
+
+button,
+a,
+[role="button"] {
+  transition: transform 150ms ease;
+}
+
+button:active,
+a:active,
+[role="button"]:active {
+  transform: scale(0.98);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button,
+  a,
+  [role="button"] {
+    transition: none;
+  }
+
+  button:active,
+  a:active,
+  [role="button"]:active {
+    transform: none;
+  }
+}
+
+.app-bottom-nav {
+  padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
+}
+
+.pb-24 {
+  padding-bottom: calc(6rem + env(safe-area-inset-bottom, 0px));
 }

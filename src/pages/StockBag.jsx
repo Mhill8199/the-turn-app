@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Briefcase, Plus, Trash2, AlertTriangle, CheckCircle2, Layers, Compass, Sparkles } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { useUnits } from '../utils/distanceUnits';
 
 export const DEFAULT_CUSTOM_BAG = [
   { id: '1', club_type: 'Driver', loft: 10.5, bounce_grind: 'Std', carry_yards: 265, total_yards: 284, shot_shape: 'Straight', grip_model: 'Golf Pride MCC Plus4', rounds_on_grip: 14 },
@@ -25,6 +26,7 @@ function parseBounceDeg(bounceGrind = '') {
 
 export default function StockBag({ clubs, setClubs }) {
   const { user } = useAuth();
+  const { formatDistance, tabularNumsClass } = useUnits();
   const [newClubName, setNewClubName] = useState('');
   const [newCarry, setNewCarry] = useState(122);
   const [newTotal, setNewTotal] = useState(125);
@@ -112,14 +114,14 @@ export default function StockBag({ clubs, setClubs }) {
         pair: `${upper.club_type} -> ${lower.club_type}`,
         diff,
         midTarget: Math.round(((Number(upper.carry_yards) || 0) + (Number(lower.carry_yards) || 0)) / 2),
-        advice: `${diff}y dead zone (${lower.carry_yards}y to ${upper.carry_yards}y). Consider strengthening ${lower.club_type} or adding a ~${Math.round(((Number(upper.carry_yards) || 0) + (Number(lower.carry_yards) || 0)) / 2)}y gap club.`,
+        advice: `${formatDistance(diff)} dead zone (${formatDistance(lower.carry_yards)} to ${formatDistance(upper.carry_yards)}). Consider strengthening ${lower.club_type} or adding a ~${formatDistance(Math.round(((Number(upper.carry_yards) || 0) + (Number(lower.carry_yards) || 0)) / 2))} gap club.`,
       });
     } else if (diff < 7) {
       gapAlerts.push({
         type: 'overlap',
         pair: `${upper.club_type} / ${lower.club_type}`,
         diff,
-        advice: `Only ${diff}y separation — redundant slot you could free up for a specialty wedge or hybrid.`,
+        advice: `Only ${formatDistance(diff)} separation — redundant slot you could free up for a specialty wedge or hybrid.`,
       });
     }
   }
@@ -192,7 +194,7 @@ export default function StockBag({ clubs, setClubs }) {
                 style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
               >
                 <div className="font-semibold flex items-center gap-1.5" style={{ color: g.type === 'deadzone' ? 'var(--accent-gold)' : '#F87171' }}>
-                  <AlertTriangle size={13} /> {g.pair} ({g.diff}y gap)
+                  <AlertTriangle size={13} /> {g.pair} ({formatDistance(g.diff)} gap)
                 </div>
                 <div className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>{g.advice}</div>
               </div>
@@ -238,8 +240,8 @@ export default function StockBag({ clubs, setClubs }) {
               <Sparkles size={13} style={{ color: 'var(--accent-emerald)' }} />
               <strong>Primary Greenside Wedge:</strong> {leadWedge.club_type} ({leadWedge.bounce_grind})
             </span>
-            <span className="font-mono text-[11px]" style={{ color: 'var(--accent-gold)' }}>
-              {leadWedge.carry_yards}y carry
+            <span className={`font-mono text-[11px] ${tabularNumsClass}`} style={{ color: '#10B981' }}>
+              {formatDistance(leadWedge.carry_yards)} carry
             </span>
           </div>
         )}
@@ -360,24 +362,24 @@ export default function StockBag({ clubs, setClubs }) {
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="grid grid-cols-3 gap-2 text-xs" data-numeric>
                 <div>
-                  <label className="block text-[10px] mb-0.5" style={{ color: 'var(--text-secondary)' }}>Carry (yds)</label>
+                  <label className="block text-[10px] mb-0.5" style={{ color: 'var(--text-secondary)' }}>Carry · <span className={tabularNumsClass}>{formatDistance(club.carry_yards)}</span></label>
                   <input
                     type="number"
                     value={club.carry_yards}
                     onChange={(e) => updateField(club.id, 'carry_yards', Number(e.target.value))}
-                    className="w-full font-mono font-bold rounded-lg px-2 py-1 border"
+                    className={`w-full font-mono font-bold rounded-lg px-2 py-1 border ${tabularNumsClass}`}
                     style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] mb-0.5" style={{ color: 'var(--text-secondary)' }}>Total (yds)</label>
+                  <label className="block text-[10px] mb-0.5" style={{ color: 'var(--text-secondary)' }}>Total · <span className={tabularNumsClass}>{formatDistance(club.total_yards)}</span></label>
                   <input
                     type="number"
                     value={club.total_yards}
                     onChange={(e) => updateField(club.id, 'total_yards', Number(e.target.value))}
-                    className="w-full font-mono font-bold rounded-lg px-2 py-1 border"
+                    className={`w-full font-mono font-bold rounded-lg px-2 py-1 border ${tabularNumsClass}`}
                     style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
                   />
                 </div>
@@ -387,7 +389,7 @@ export default function StockBag({ clubs, setClubs }) {
                     type="number"
                     value={club.rounds_on_grip || 0}
                     onChange={(e) => updateField(club.id, 'rounds_on_grip', Number(e.target.value))}
-                    className="w-full font-mono font-bold rounded-lg px-2 py-1 border"
+                    className={`w-full font-mono font-bold rounded-lg px-2 py-1 border ${tabularNumsClass}`}
                     style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
                   />
                 </div>

@@ -1,12 +1,13 @@
-﻿import WardrobeFlatLay from './components/WardrobeFlatLay';
-import PostRoundAnalyticsAndTrophies from './components/PostRoundAnalyticsAndTrophies';
-import SocialScorecardGenerator from './components/SocialScorecardGenerator';
+﻿import PostRoundAnalyticsAndTrophies from './components/PostRoundAnalyticsAndTrophies';
 import JuniorStudentPassModal from './components/JuniorStudentPassModal';
+import OnCourseHoleHUD from './components/OnCourseHoleHUD';
 import VeteranOwnedBadge from './components/VeteranOwnedBadge';
 import VirtualTryOnStudio from './components/VirtualTryOnStudio';
 import { Sun, Moon, Shirt, Compass, Briefcase, Users, Crown, LogIn, LogOut, Watch, Glasses, X, ShieldCheck, Check, Loader2, KeyRound, Copy, Sliders } from 'lucide-react';
 import { useTheme } from './context/ThemeContext';
 import { useAuth } from './context/AuthContext';
+import { useUnits } from './utils/distanceUnits';
+import { LanguageSelector, useLanguage } from './i18n/LanguageContext';
 import { supabase } from './lib/supabase';
 import PrepWardrobe from './pages/PrepWardrobe';
 import CourseLayout from './pages/CourseLayout';
@@ -14,6 +15,8 @@ import StockBag, { DEFAULT_CUSTOM_BAG } from './pages/StockBag';
 import FoursomeHub from './pages/FoursomeHub';
 import AuthModal from './components/AuthModal';
 import OnboardingModal from './components/OnboardingModal';
+import BetaGateAndFeedback from './components/BetaGateAndFeedback';
+import DeleteAccountSection from './components/DeleteAccountSection';
 
 import React, { useState, useEffect } from 'react';
 
@@ -42,7 +45,7 @@ function SmartGlassesHud({ clubs }) {
           >
             -5
           </button>
-          <div className="text-6xl font-extrabold text-white">{targetYards}y</div>
+          <div className="text-6xl font-extrabold text-white tabular-nums">{targetYards}y</div>
           <button
             type="button"
             onClick={() => setTargetYards((y) => Math.min(320, y + 5))}
@@ -55,7 +58,7 @@ function SmartGlassesHud({ clubs }) {
         <div className="p-5 rounded-3xl border-2 border-emerald-500 bg-emerald-950/30 space-y-2">
           <div className="text-xs uppercase tracking-widest text-amber-400">Recommended Club</div>
           <div className="text-4xl font-black text-white">{best?.club_type}</div>
-          <div className="text-sm text-emerald-300">
+          <div className="text-sm text-emerald-300 tabular-nums">
             Stock {best?.carry_yards}y Carry • {best?.total_yards}y Total • {best?.shot_shape || 'Straight'}
           </div>
         </div>
@@ -71,6 +74,9 @@ function SmartGlassesHud({ clubs }) {
 export default function App() {
   const { theme, toggleTheme } = useTheme();
   const { user, profile, signOut, refreshProfile } = useAuth();
+  const { distanceUnit, toggleDistanceUnit, tabularNumsClass } = useUnits();
+  const { t } = useLanguage();
+  const [courseHole, setCourseHole] = useState(null);
   const [activeTab, setActiveTab] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get('invite') || params.get('crew') ? 'foursome' : 'course';
@@ -221,38 +227,6 @@ const handleStartCheckout = async () => {
   if (window.location.pathname === '/cart-hud') {
     return <OnCourseHoleHUD />;
   }
-if (window.location.pathname === '/batch2-test') {
-  return (
-    <div className="min-h-screen max-w-md mx-auto p-4 space-y-6 bg-zinc-950 text-white">
-      <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-        <span className="font-bold text-sm tracking-wider uppercase text-emerald-400">Batch 1 & 2 Test Bench</span>
-        <a href="/" className="text-xs px-3 py-1 rounded-lg border border-zinc-700">Back to App</a>
-      </div>
-      <WardrobeFlatLay />
-      <PostRoundAnalyticsAndTrophies />
-    </div>
-  );
-}
-if (window.location.pathname === '/batch3-test') {
-  return (
-    <div className="min-h-screen max-w-md mx-auto p-4 space-y-6">
-      <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--border-subtle)' }}>
-        <span className="font-bold text-sm tracking-wider uppercase" style={{ color: 'var(--accent-emerald)' }}>Batch 3 Test Bench</span>
-        <a href="/" className="text-xs px-3 py-1 rounded-lg border" style={{ borderColor: 'var(--border-subtle)' }}>Back to App</a>
-      </div>
-      <VeteranOwnedBadge />
-      <SocialScorecardGenerator />
-      <JuniorStudentPassModal />
-    </div>
-  );
-}
-if (window.location.pathname === '/hud') {
-    return <SmartGlassesHud clubs={clubs} />;
-  }
-
-if (window.location.pathname === '/cart-hud') {
-    return <OnCourseHoleHUD />;
-  }
 
   if (window.location.pathname === '/hud') {
     return <SmartGlassesHud clubs={clubs} />;
@@ -271,9 +245,11 @@ if (window.location.pathname === '/cart-hud') {
           </a>
         </div>
         <div className="space-y-3 text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-          <p><strong style={{ color: 'var(--text-primary)' }}>1. Data We Collect:</strong> Account email, display name, custom golf club stock yardages, wardrobe items, and optional GPS coordinates used solely to fetch local course weather, dew point, wind, and elevation.</p>
-          <p><strong style={{ color: 'var(--text-primary)' }}>2. Wearables & SMS Invites:</strong> Optional Apple Watch, Garmin, and Meta smart glasses integrations read your stock yardages and active hole notes on-demand. Foursome SMS links are initiated directly from your device.</p>
-          <p><strong style={{ color: 'var(--text-primary)' }}>3. Data Security & Deletion:</strong> All user records are stored with Row-Level Security via Supabase. You may request account or data deletion anytime by contacting Solis Noir LLC.</p>
+          <p><strong style={{ color: 'var(--text-primary)' }}>1. Operator:</strong> Solis Noir LLC operates The Turn.</p>
+          <p><strong style={{ color: 'var(--text-primary)' }}>2. On-device photos:</strong> Photos in the try-on vault are encrypted with AES-256 (AES-GCM) on this device and are not uploaded.</p>
+          <p><strong style={{ color: 'var(--text-primary)' }}>3. Supabase telemetry:</strong> Supabase stores your account email, profile, bag, scores, and beta feedback when you submit it. Optional GPS is used only to fetch local course weather, dew point, wind, and elevation. Records use Row-Level Security.</p>
+          <p><strong style={{ color: 'var(--text-primary)' }}>4. Wearables & SMS:</strong> Optional Apple Watch, Garmin, and Meta smart glasses integrations read stock yardages and active hole notes on demand. Foursome SMS links start from your device.</p>
+          <p><strong style={{ color: 'var(--text-primary)' }}>5. Deletion rights:</strong> Wipe Local Vault & Cache clears this device. Delete My Account & All Data calls delete_own_account, then wipes local data and signs you out. You can also contact Solis Noir LLC to request deletion.</p>
         </div>
       </div>
     );
@@ -294,7 +270,7 @@ if (window.location.pathname === '/cart-hud') {
           <span
             className="ml-2 text-[10px] font-semibold uppercase tracking-widest px-2 py-0.5 rounded-full"
             style={{
-              backgroundColor: isPro ? 'var(--accent-gold)' : 'var(--bg-elevated)',
+              backgroundColor: isPro ? 'var(--accent-gold-pro)' : 'var(--bg-elevated)',
               color: isPro ? '#111412' : 'var(--text-secondary)',
             }}
           >
@@ -305,7 +281,7 @@ if (window.location.pathname === '/cart-hud') {
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => setOnboardingOpen(true)}
-            className="p-2 rounded-lg border"
+            className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2 rounded-lg border"
             style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
             title="Re-Run 3-Step Setup"
           >
@@ -314,36 +290,51 @@ if (window.location.pathname === '/cart-hud') {
 
           <button
             onClick={() => setDemoPro(!demoPro)}
-            className="text-[11px] px-2.5 py-1.5 rounded-lg border font-medium"
+            className="min-h-[44px] inline-flex items-center justify-center text-[11px] px-2.5 py-1.5 rounded-lg border font-medium"
             style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
           >
             {isPro ? 'Free' : 'Pro'}
           </button>
 
           <button
+            type="button"
+            onClick={toggleDistanceUnit}
+            className={`min-h-[44px] inline-flex items-center justify-center text-[11px] px-2.5 py-1.5 rounded-lg border font-medium ${tabularNumsClass}`}
+            style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
+            aria-label={distanceUnit === 'yds' ? 'Distance unit yards. Switch to meters' : 'Distance unit meters. Switch to yards'}
+            title="Switch between yards and meters"
+          >
+            {distanceUnit === 'yds' ? 'Yds' : 'Meters'}
+          </button>
+
+          <button
             onClick={toggleTheme}
-            className="p-2 rounded-lg border"
+            className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2 rounded-lg border"
             style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
             aria-label="Toggle Light and Dark Mode"
           >
             {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
           </button>
 
+          <LanguageSelector />
+
           {user ? (
             <button
               onClick={signOut}
-              className="p-2 rounded-lg border"
+              className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2 rounded-lg border"
               style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
-              title="Sign Out"
+              title={t('signOut')}
+              aria-label={t('signOut')}
             >
               <LogOut size={15} />
             </button>
           ) : (
             <button
               onClick={() => setAuthOpen(true)}
-              className="p-2 rounded-lg border"
+              className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2 rounded-lg border"
               style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
-              title="Sign In"
+              title={t('signIn')}
+              aria-label={t('signIn')}
             >
               <LogIn size={15} />
             </button>
@@ -355,7 +346,7 @@ if (window.location.pathname === '/cart-hud') {
         {upgradeBanner && (
           <div className="mb-3 p-3 rounded-xl border text-xs font-semibold flex items-center justify-between" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-emerald)', color: 'var(--accent-emerald)' }}>
             <span>{upgradeBanner}</span>
-            <button onClick={() => setUpgradeBanner('')}><X size={14} /></button>
+            <button type="button" onClick={() => setUpgradeBanner('')} className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center" aria-label="Dismiss"><X size={14} /></button>
           </div>
         )}
 
@@ -365,6 +356,7 @@ if (window.location.pathname === '/cart-hud') {
             isPro={isPro}
             onOpenPaywall={(feat) => { setCheckoutError(''); setPaywallFeature(feat); }}
             onOpenWearable={() => { setTokenStatus(''); setWearableOpen(true); }}
+            onActiveHole={setCourseHole}
           />
         )}
         {activeTab === 'bag' && <StockBag clubs={clubs} setClubs={setClubs} />}
@@ -384,7 +376,7 @@ if (window.location.pathname === '/cart-hud') {
             className="text-xs font-semibold px-3 py-1.5 rounded-xl border"
             style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
           >
-            Share Scorecard
+            {t('scorecard')}
           </button>
           <button
             type="button"
@@ -392,7 +384,7 @@ if (window.location.pathname === '/cart-hud') {
             className="text-xs font-semibold px-3 py-1.5 rounded-xl border"
             style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
           >
-            {studentPassActive ? 'Student Pass Active' : 'Junior / Student ($49.99)'}
+            {studentPassActive ? t('studentPass') : 'Junior / Student ($49.99)'}
           </button>
           <button
             type="button"
@@ -400,7 +392,7 @@ if (window.location.pathname === '/cart-hud') {
             className="text-xs font-semibold px-3 py-1.5 rounded-xl border"
             style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
           >
-            Try-On Studio
+            {t('tryOn')}
           </button>
         </div>
         <div className="text-center pb-24 pt-1 flex flex-col items-center gap-2">
@@ -409,7 +401,7 @@ if (window.location.pathname === '/cart-hud') {
               <Glasses size={12} /> Glasses /HUD
             </a>
             <a href="/privacy-policy" className="text-[11px] inline-flex items-center gap-1 opacity-70 hover:opacity-100">
-              <ShieldCheck size={12} /> Solis Noir LLC • Privacy Policy
+              <ShieldCheck size={12} /> Solis Noir LLC • {t('privacy')}
             </a>
           </div>
           <VeteranOwnedBadge compact />
@@ -437,11 +429,11 @@ if (window.location.pathname === '/cart-hud') {
               <span className="text-xs font-extrabold uppercase tracking-wider text-emerald-400">
                 Post-Round Scorecard
               </span>
-              <button type="button" onClick={() => setScorecardOpen(false)} className="p-1">
+              <button type="button" onClick={() => setScorecardOpen(false)} className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-1" aria-label="Close scorecard">
                 <X size={18} />
               </button>
             </div>
-            <SocialScorecardGenerator />
+            <PostRoundAnalyticsAndTrophies />
           </div>
         </div>
       )}
@@ -466,7 +458,7 @@ if (window.location.pathname === '/cart-hud') {
               <span className="text-xs font-extrabold uppercase tracking-wider text-emerald-400">
                 Virtual Try-On Studio
               </span>
-              <button type="button" onClick={() => setTryOnOpen(false)} className="p-1" aria-label="Close try-on studio">
+              <button type="button" onClick={() => setTryOnOpen(false)} className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-1" aria-label="Close try-on studio">
                 <X size={18} />
               </button>
             </div>
@@ -477,12 +469,12 @@ if (window.location.pathname === '/cart-hud') {
 
       {wearableOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-2xl p-5 border space-y-4" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
+          <div className="w-full max-w-md rounded-3xl p-5 border space-y-4" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent-gold)' }}>
                 Wearable Caddie Preview
               </span>
-              <button onClick={() => setWearableOpen(false)}><X size={18} /></button>
+              <button type="button" onClick={() => setWearableOpen(false)} className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center" aria-label="Close wearable preview"><X size={18} /></button>
             </div>
 
             <div className="p-4 rounded-2xl border space-y-1.5" style={{ backgroundColor: '#0B0D0C', borderColor: '#2B352F', color: '#F3F4F1' }}>
@@ -490,7 +482,7 @@ if (window.location.pathname === '/cart-hud') {
                 <span className="flex items-center gap-1"><Watch size={13} /> APPLE WATCH • LIVE ACTIVITY</span>
                 <span>HOLE 4</span>
               </div>
-              <div className="text-base font-bold">{leadClub?.club_type} • {leadClub?.carry_yards}y Stock</div>
+              <div className="text-base font-bold tabular-nums">{leadClub?.club_type} • {leadClub?.carry_yards}y Stock</div>
               <div className="text-xs text-zinc-400">Leaves 148y approach • Favor left-center fairway</div>
             </div>
 
@@ -536,12 +528,12 @@ if (window.location.pathname === '/cart-hud') {
 
       {paywallFeature && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-2xl p-5 border space-y-4" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
+          <div className="w-full max-w-md max-h-[92vh] overflow-y-auto rounded-3xl p-5 border space-y-4 daylight-border" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-gold-pro)' }}>
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-amber-500 font-semibold text-xs uppercase tracking-wider">
+              <div className="flex items-center gap-2 font-semibold text-xs uppercase tracking-wider" style={{ color: 'var(--accent-gold-pro)' }}>
                 <Crown size={16} /> Tour Pro Membership
               </div>
-              <button onClick={() => setPaywallFeature(null)} className="p-1 opacity-75 hover:opacity-100">
+              <button type="button" onClick={() => setPaywallFeature(null)} className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-1 opacity-75 hover:opacity-100" aria-label="Close membership">
                 <X size={18} />
               </button>
             </div>
@@ -576,7 +568,7 @@ if (window.location.pathname === '/cart-hud') {
                   </div>
                 </div>
                 <div className="text-right shrink-0 ml-2">
-                  <div className="font-mono font-bold text-base">$119.99</div>
+                  <div className="font-mono font-bold text-base tabular-nums">$119.99</div>
                   <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>per year</div>
                 </div>
               </button>
@@ -587,7 +579,7 @@ if (window.location.pathname === '/cart-hud') {
                 className="w-full text-left p-3.5 rounded-xl border transition flex items-center justify-between"
                 style={{
                   backgroundColor: 'var(--bg-elevated)',
-                  borderColor: selectedPlan === 'foursome' ? 'var(--accent-gold)' : 'var(--border-subtle)',
+                  borderColor: selectedPlan === 'foursome' ? 'var(--accent-gold-pro)' : 'var(--border-subtle)',
                   borderWidth: selectedPlan === 'foursome' ? '2px' : '1px',
                 }}
               >
@@ -596,7 +588,7 @@ if (window.location.pathname === '/cart-hud') {
                     Foursome Crew Pass
                     <span
                       className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full"
-                      style={{ backgroundColor: 'var(--accent-gold)', color: '#111412' }}
+                      style={{ backgroundColor: 'var(--accent-gold-pro)', color: '#111412' }}
                     >
                       4 Seats • Save $180
                     </span>
@@ -606,11 +598,23 @@ if (window.location.pathname === '/cart-hud') {
                   </div>
                 </div>
                 <div className="text-right shrink-0 ml-2">
-                  <div className="font-mono font-bold text-base" style={{ color: 'var(--accent-gold)' }}>$299.99</div>
+                  <div className="font-mono font-bold text-base tabular-nums" style={{ color: 'var(--accent-gold-pro)' }}>$299.99</div>
                   <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>per year</div>
                 </div>
               </button>
             </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setPaywallFeature(null);
+                setStudentPassOpen(true);
+              }}
+              className="w-full min-h-[44px] text-left px-3.5 rounded-xl border text-sm font-semibold"
+              style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
+            >
+              Junior / Student ($49.99)
+            </button>
 
             {checkoutError && (
               <p className="text-[11px] text-amber-500">
@@ -646,19 +650,23 @@ if (window.location.pathname === '/cart-hud') {
                 Close
               </button>
             </div>
+
+            <DeleteAccountSection />
           </div>
         </div>
       )}
 
+      <BetaGateAndFeedback activeTab={activeTab} holeNumber={activeTab === 'course' ? courseHole : null} />
+
       <nav
-        className="sticky bottom-0 z-20 border-t px-2 py-2 grid grid-cols-4 gap-1 backdrop-blur-md"
+        className="app-bottom-nav sticky bottom-0 z-20 border-t px-2 pt-2 pb-[env(safe-area-inset-bottom)] grid grid-cols-4 gap-1 backdrop-blur-md"
         style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
       >
         {[
-          { id: 'course', label: 'Course', icon: Compass },
-          { id: 'bag', label: 'My Bag', icon: Briefcase },
-          { id: 'foursome', label: 'Foursome', icon: Users },
-          { id: 'prep', label: 'Prep & Fit', icon: Shirt },
+          { id: 'course', label: t('course'), icon: Compass },
+          { id: 'bag', label: t('bag'), icon: Briefcase },
+          { id: 'foursome', label: t('foursome'), icon: Users },
+          { id: 'prep', label: t('prep'), icon: Shirt },
         ].map((tab) => {
           const Icon = tab.icon;
           const active = activeTab === tab.id;
@@ -666,7 +674,7 @@ if (window.location.pathname === '/cart-hud') {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className="flex flex-col items-center py-1.5 rounded-xl text-xs font-medium transition"
+              className="min-h-[44px] flex flex-col items-center justify-center py-1.5 rounded-xl text-xs font-medium transition"
               style={{ color: active ? 'var(--accent-emerald)' : 'var(--text-secondary)' }}
             >
               <Icon size={18} className="mb-1" />

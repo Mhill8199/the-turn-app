@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Trophy, Award, Crosshair, Flame } from 'lucide-react';
+import SocialScorecardGenerator from './SocialScorecardGenerator';
 
 function RadialGauge({ label, valueText, percent, strokeColor = '#10B981', sublabel }) {
   const radius = 34;
@@ -8,7 +9,7 @@ function RadialGauge({ label, valueText, percent, strokeColor = '#10B981', subla
   const dashOffset = circumference - (clamped / 100) * circumference;
 
   return (
-    <div className="flex flex-col items-center p-3 rounded-2xl bg-zinc-900/80 border border-zinc-800">
+    <div className="flex flex-col items-center p-3 rounded-3xl bg-zinc-900/80 border border-zinc-800">
       <div className="relative w-22 h-22 flex items-center justify-center">
         <svg className="w-20 h-20 -rotate-90" viewBox="0 0 84 84">
           <circle cx="42" cy="42" r={radius} stroke="#27272A" strokeWidth="7" fill="none" />
@@ -24,7 +25,7 @@ function RadialGauge({ label, valueText, percent, strokeColor = '#10B981', subla
             fill="none"
           />
         </svg>
-        <span className="absolute text-sm font-black text-white">{valueText}</span>
+        <span className="absolute text-sm font-black text-white tabular-nums">{valueText}</span>
       </div>
       <span className="mt-1 text-[11px] font-bold text-zinc-200">{label}</span>
       {sublabel && <span className="text-[10px] text-zinc-400">{sublabel}</span>}
@@ -111,7 +112,7 @@ export default function PostRoundAnalyticsAndTrophies({
       </section>
 
       {/* Top-Two Clubs Highlight */}
-      <section className="p-4 rounded-2xl bg-zinc-900/90 border border-zinc-800 space-y-2.5">
+      <section className="p-4 rounded-3xl bg-zinc-900/90 border border-zinc-800 space-y-2.5">
         <div className="text-xs font-extrabold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
           <Flame size={14} /> Top-Two Money Clubs Today
         </div>
@@ -120,7 +121,7 @@ export default function PostRoundAnalyticsAndTrophies({
             <div key={idx} className="p-3 rounded-xl bg-black/60 border border-zinc-800">
               <div className="text-[10px] font-mono text-zinc-400">#{idx + 1} PERFORMER</div>
               <div className="text-xs font-black text-white mt-0.5">{item.club}</div>
-              <div className="text-[11px] text-emerald-400 font-bold mt-1">
+              <div className="text-[11px] font-bold mt-1 tabular-nums" style={{ color: '#10B981' }}>
                 {item.proximity} • {item.strokesGained}
               </div>
             </div>
@@ -132,7 +133,7 @@ export default function PostRoundAnalyticsAndTrophies({
       <section className="space-y-2.5">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-extrabold uppercase tracking-wider flex items-center gap-1.5">
-            <Trophy size={15} className="text-amber-400" /> Trophy Room (Tap for Foil & Haptics)
+            <Trophy size={15} style={{ color: '#D4AF37' }} /> Trophy Room (Tap for Foil & Haptics)
           </h3>
         </div>
 
@@ -144,13 +145,13 @@ export default function PostRoundAnalyticsAndTrophies({
                 key={card.id}
                 type="button"
                 onClick={() => triggerHapticAndFlip(card.id)}
-                className={`w-full text-left p-[2px] rounded-2xl bg-gradient-to-r ${card.gradient} transition-transform duration-300 ${
+                className={`w-full text-left p-[2px] rounded-3xl bg-gradient-to-r ${card.gradient} transition-transform duration-300 ${
                   inspected ? 'scale-[1.02] shadow-2xl' : 'scale-100'
                 }`}
               >
                 <div className="p-4 rounded-[14px] bg-zinc-950/95 flex items-center justify-between">
                   <div>
-                    <span className="text-[9px] font-mono font-black tracking-widest uppercase px-2 py-0.5 rounded bg-white/10 text-amber-300">
+                    <span className="text-[9px] font-mono font-black tracking-widest uppercase px-2 py-0.5 rounded bg-white/10" style={{ color: '#D4AF37' }}>
                       {card.rarity}
                     </span>
                     <div className="text-base font-black text-white mt-1.5">{card.title}</div>
@@ -168,6 +169,8 @@ export default function PostRoundAnalyticsAndTrophies({
           })}
         </div>
       </section>
+
+      <SocialScorecardGenerator />
     </div>
   );
 }

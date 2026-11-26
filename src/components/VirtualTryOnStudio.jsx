@@ -144,12 +144,17 @@ export default function VirtualTryOnStudio() {
         <button
           type="button"
           onClick={() => setVaultOpen(true)}
-          className="text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border inline-flex items-center gap-1"
+          className="min-h-[44px] text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border inline-flex items-center gap-1"
           style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
         >
           <Upload size={12} /> {baseline ? 'Update Baseline' : 'Add Baseline Photo'}
         </button>
       </div>
+      {!baseline && (
+        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+          No baseline photo in the vault yet. Add one to try clothes on your photo.
+        </p>
+      )}
 
       <div
         className="relative mx-auto w-full max-w-[260px] aspect-[3/5] rounded-3xl overflow-hidden border touch-pan-y"

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Check, Share2 } from 'lucide-react';
 import { COURSE_PRESETS } from '../lib/weatherPhysics';
+import { useUnits } from '../utils/distanceUnits';
 
 const DEMO_HOLES = [
   { number: 1, par: 4, strokes: 4 },
@@ -60,6 +61,7 @@ export default function SocialScorecardGenerator({
   courseName,
   holes,
 }) {
+  const { tabularNumsClass } = useUnits();
   const [copied, setCopied] = useState(false);
   const [shareNote, setShareNote] = useState('');
   const live = useMemo(() => (holes ? null : loadLiveCard()), [holes]);
@@ -101,7 +103,7 @@ export default function SocialScorecardGenerator({
   };
 
   return (
-    <section className="rounded-2xl border p-4 space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
+    <section className="rounded-3xl border p-4 space-y-3" data-numeric style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: 'var(--accent-emerald)' }}>
@@ -113,14 +115,14 @@ export default function SocialScorecardGenerator({
           </div>
         </div>
         <div className="text-right">
-          <div className="text-2xl font-black font-mono">{sum(cardHoles, 'strokes')}</div>
-          <div className="text-xs font-semibold" style={{ color: 'var(--accent-gold)' }}>{relToPar(cardHoles)}</div>
+          <div className={`text-2xl font-black font-mono ${tabularNumsClass}`}>{sum(cardHoles, 'strokes')}</div>
+          <div className={`text-xs font-semibold ${tabularNumsClass}`} style={{ color: 'var(--accent-gold)' }}>{relToPar(cardHoles)}</div>
         </div>
       </div>
 
       {rows.map((row, idx) => (
         <div key={idx} className="overflow-x-auto">
-          <table className="w-full text-center text-xs font-mono">
+          <table className={`w-full text-center text-xs font-mono ${tabularNumsClass}`}>
             <thead>
               <tr style={{ color: 'var(--text-secondary)' }}>
                 <th className="text-left font-medium py-1"> </th>

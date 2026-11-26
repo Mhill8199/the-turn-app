@@ -71,7 +71,7 @@ export default function BaselinePhotoVaultModal({ onClose, onPhotoSaved }) {
       >
         <div className="flex items-center justify-between">
           <span className="text-xs font-extrabold uppercase tracking-wider text-emerald-400">Baseline Photo Vault</span>
-          <button type="button" onClick={onClose} aria-label="Close baseline vault">
+          <button type="button" onClick={onClose} aria-label="Close baseline vault" className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center">
             <X size={18} />
           </button>
         </div>

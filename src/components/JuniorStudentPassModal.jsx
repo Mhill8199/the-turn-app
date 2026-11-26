@@ -14,9 +14,23 @@ const PASSES = [
     title: 'Student Pass',
     price: '$69.99',
     detail: 'Current student • one Tour Pro seat',
-    note: 'Use a school email so the pass can be verified.',
+    note: 'School email: .edu, .k12., .ac.uk, .edu.au, .edu.mx, .ac.jp, or .edu.ca.',
   },
 ];
+
+export function isAcademicEmail(email) {
+  const domain = String(email || '').trim().toLowerCase().split('@')[1] || '';
+  if (!domain) return false;
+  return (
+    domain.endsWith('.edu')
+    || domain.includes('.k12.')
+    || domain.endsWith('.ac.uk')
+    || domain.endsWith('.edu.au')
+    || domain.endsWith('.edu.mx')
+    || domain.endsWith('.ac.jp')
+    || domain.endsWith('.edu.ca')
+  );
+}
 
 function makeAdultVoucherCode() {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -38,6 +52,8 @@ export default function JuniorStudentPassModal({
   const [internalOpen, setInternalOpen] = useState(false);
   const [selected, setSelected] = useState('junior');
   const [graduationYear, setGraduationYear] = useState(currentYear);
+  const [schoolEmail, setSchoolEmail] = useState('');
+  const [emailError, setEmailError] = useState('');
   const unlockMode = typeof onUnlockStudentPro === 'function';
   const controlled = openProp !== undefined;
   const open = controlled ? openProp : unlockMode ? true : internalOpen;
@@ -49,6 +65,11 @@ export default function JuniorStudentPassModal({
 
   const claim = () => {
     const pass = PASSES.find((p) => p.id === selected);
+    if (selected === 'student' && !isAcademicEmail(schoolEmail)) {
+      setEmailError('Use a school email ending in .edu, .k12., .ac.uk, .edu.au, .edu.mx, .ac.jp, or .edu.ca.');
+      return;
+    }
+    setEmailError('');
     if (unlockMode) {
       const verifiedAtDate = new Date();
       const expiresAtDate = new Date(verifiedAtDate.getTime());
@@ -59,6 +80,7 @@ export default function JuniorStudentPassModal({
         expiresAt: expiresAtDate.toISOString(),
         maxRenewals: 4,
         graduationYear,
+        schoolEmail: selected === 'student' ? schoolEmail.trim() : '',
         id: pass.id,
         title: pass.title,
         price: pass.price,
@@ -97,12 +119,12 @@ export default function JuniorStudentPassModal({
 
       {open && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-2xl p-5 border space-y-4" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
+          <div className="w-full max-w-md rounded-3xl p-5 border space-y-4" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-gold-pro)' }}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent-gold)' }}>
                 <GraduationCap size={16} /> Junior & Student Pass
               </div>
-              <button type="button" onClick={close} aria-label="Close">
+              <button type="button" onClick={close} aria-label="Close" className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center">
                 <X size={18} />
               </button>
             </div>
@@ -130,7 +152,7 @@ export default function JuniorStudentPassModal({
                         <div className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>{pass.detail}</div>
                       </div>
                       <div className="text-right shrink-0">
-                        <div className="font-mono font-bold">{pass.price}</div>
+                        <div className="font-mono font-bold tabular-nums">{pass.price}</div>
                         <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>per year</div>
                       </div>
                     </div>
@@ -139,6 +161,25 @@ export default function JuniorStudentPassModal({
                 );
               })}
             </div>
+            {selected === 'student' && (
+              <label className="block space-y-1.5">
+                <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>School email</span>
+                <input
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  value={schoolEmail}
+                  onChange={(event) => { setSchoolEmail(event.target.value); setEmailError(''); }}
+                  placeholder="name@university.edu"
+                  className="w-full min-h-[44px] rounded-xl border px-3 py-2 text-sm"
+                  style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)', color: 'var(--text-primary)' }}
+                />
+                <span className="block text-[11px]" style={{ color: 'var(--text-secondary)' }}>
+                  Accepted: .edu, .k12., .ac.uk, .edu.au, .edu.mx, .ac.jp, .edu.ca
+                </span>
+                {emailError && <span className="block text-[11px] text-amber-500">{emailError}</span>}
+              </label>
+            )}
             <label className="block space-y-1.5">
               <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>Graduation Year</span>
               <select

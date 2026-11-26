@@ -1,4 +1,4 @@
-﻿import { createContext, useContext, useEffect, useState } from 'react';
+﻿import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 
 const AuthContext = createContext();
@@ -45,8 +45,14 @@ export function AuthProvider({ children }) {
 
   const signOut = () => supabase.auth.signOut();
 
+  // Merges into the in-memory profile. is_beta_tester lives here even if the profiles column is missing.
+  const patchProfile = useCallback((partial) => {
+    if (!partial || typeof partial !== 'object') return;
+    setProfile((current) => ({ ...(current || {}), ...partial }));
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signInWithEmail, signUpWithEmail, signOut, refreshProfile: () => user && fetchProfile(user.id) }}>
+    <AuthContext.Provider value={{ user, profile, loading, signInWithEmail, signUpWithEmail, signOut, refreshProfile: () => user && fetchProfile(user.id), patchProfile }}>
       {children}
     </AuthContext.Provider>
   );

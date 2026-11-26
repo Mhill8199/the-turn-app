@@ -422,22 +422,22 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
               Synced to Recap
             </span>
           </div>
-          <div className="grid grid-cols-4 gap-1.5 text-center text-xs">
+          <div className="grid grid-cols-4 gap-1.5 text-center text-xs" data-numeric>
             <div className="p-2 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
               <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Strokes</div>
-              <div className="font-mono font-bold">{liveStats.totalStrokes}</div>
+              <div className="font-mono font-bold tabular-nums">{liveStats.totalStrokes}</div>
             </div>
             <div className="p-2 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
               <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>GIR %</div>
-              <div className="font-mono font-bold">{liveStats.girPct}%</div>
+              <div className="font-mono font-bold tabular-nums">{liveStats.girPct}%</div>
             </div>
             <div className="p-2 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
               <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>FIR %</div>
-              <div className="font-mono font-bold">{liveStats.firPct !== null ? `${liveStats.firPct}%` : 'N/A'}</div>
+              <div className="font-mono font-bold tabular-nums">{liveStats.firPct !== null ? `${liveStats.firPct}%` : 'N/A'}</div>
             </div>
             <div className="p-2 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
               <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Putts</div>
-              <div className="font-mono font-bold">{liveStats.totalPutts}</div>
+              <div className="font-mono font-bold tabular-nums">{liveStats.totalPutts}</div>
             </div>
           </div>
         </div>
@@ -657,8 +657,14 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
           <h3 className="font-semibold text-sm flex items-center gap-1.5">
             <Shirt size={15} style={{ color: 'var(--accent-emerald)' }} /> Lineup, HCP & Outfit Check
           </h3>
-          <span className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>Low HCP: {baselineHcp}</span>
+          <span className="text-[11px] tabular-nums" style={{ color: 'var(--text-secondary)' }}>Low HCP: {baselineHcp}</span>
         </div>
+
+        {players.length === 0 && (
+          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+            No players in this foursome yet. Use the form above to add someone.
+          </p>
+        )}
 
         {players.map((p) => {
           const playingStrokes = Math.max(0, (Number(p.hcp) || 0) - baselineHcp);
@@ -687,7 +693,7 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
                   </label>
                 </div>
                 <div className="text-xs mt-0.5 truncate" style={{ color: 'var(--text-secondary)' }}>{p.fit}</div>
-                <div className="text-[10px] font-mono mt-0.5" style={{ color: 'var(--accent-emerald)' }}>
+                <div className="text-[10px] font-mono mt-0.5 tabular-nums" style={{ color: 'var(--accent-emerald)' }}>
                   Gross {p.score} • Net {netScore} (-{playingStrokes} strokes)
                   {p.id === '1' && liveStats ? ` • GIR ${liveStats.girPct}% • FIR ${liveStats.firPct !== null ? `${liveStats.firPct}%` : 'N/A'} • ${liveStats.totalPutts} putts` : ''}
                 </div>
@@ -761,7 +767,7 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
                 </div>
                 <div className="flex items-center gap-2">
                   <button onClick={() => adjustSkins(p.id, -1)} className="w-6 h-6 rounded border font-bold" style={{ borderColor: 'var(--border-subtle)' }}>-</button>
-                  <span className="font-mono w-10 text-center">{p.skins} sk</span>
+                  <span className="font-mono w-10 text-center tabular-nums">{p.skins} sk</span>
                   <button onClick={() => adjustSkins(p.id, 1)} className="w-6 h-6 rounded border font-bold" style={{ borderColor: 'var(--border-subtle)' }}>+</button>
                   <span className={`font-mono font-bold w-13 text-right ${totalSettlement >= 0 ? 'text-emerald-500' : 'text-red-400'}`}>
                     {totalSettlement >= 0 ? `+$${totalSettlement}` : `-$${Math.abs(totalSettlement)}`}

@@ -4,6 +4,8 @@ import './index.css';
 import App from './App.jsx';
 import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
+import { LanguageProvider } from './i18n/LanguageContext';
+import { UnitProvider } from './utils/distanceUnits';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
@@ -15,7 +17,11 @@ createRoot(document.getElementById('root')).render(
   <StrictMode>
     <AuthProvider>
       <ThemeProvider>
-        <App />
+        <LanguageProvider>
+          <UnitProvider>
+            <App />
+          </UnitProvider>
+        </LanguageProvider>
       </ThemeProvider>
     </AuthProvider>
   </StrictMode>

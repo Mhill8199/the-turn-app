@@ -65,14 +65,114 @@ export async function fetchElevationFt(lat, lon) {
   }
 }
 
+const COURSE_CACHE_DB = 'the-turn-course-cache';
+const COURSE_CACHE_STORE = 'courses';
+const SAVED_COURSES_KEY = 'directory|saved-courses';
+
+function directoryCacheKey(query, lat, lon) {
+  if (query && String(query).trim()) return `directory|q|${String(query).trim().toLowerCase()}`;
+  const la = Number(lat);
+  const lo = Number(lon);
+  if (!Number.isFinite(la) || !Number.isFinite(lo)) return 'directory|unknown';
+  return `directory|gps|${la.toFixed(2)},${lo.toFixed(2)}`;
+}
+
+function openCourseDirectoryDb() {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') {
+      reject(new Error('IndexedDB unavailable'));
+      return;
+    }
+    const request = indexedDB.open(COURSE_CACHE_DB, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(COURSE_CACHE_STORE)) {
+        db.createObjectStore(COURSE_CACHE_STORE, { keyPath: 'key' });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('IndexedDB open failed'));
+  });
+}
+
+async function readDirectoryRecord(key) {
+  try {
+    const db = await openCourseDirectoryDb();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(COURSE_CACHE_STORE, 'readonly');
+      const req = tx.objectStore(COURSE_CACHE_STORE).get(key);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function writeDirectoryRecord(record) {
+  try {
+    const db = await openCourseDirectoryDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(COURSE_CACHE_STORE, 'readwrite');
+      const store = tx.objectStore(COURSE_CACHE_STORE);
+      const req = store.keyPath ? store.put(record) : store.put(record, record.key);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error || tx.error);
+    });
+  } catch {
+    // Offline cache is best-effort; a failed write must not block search.
+  }
+}
+
+async function rememberCourses(courses) {
+  const list = (courses || []).filter((course) => course && course.id);
+  if (!list.length) return;
+  const existing = await readDirectoryRecord(SAVED_COURSES_KEY);
+  const byId = new Map((existing?.courses || []).map((course) => [course.id, course]));
+  for (const course of list) {
+    byId.set(course.id, course);
+    await writeDirectoryRecord({ key: `selected|${course.id}`, course, savedAt: Date.now() });
+  }
+  await writeDirectoryRecord({
+    key: SAVED_COURSES_KEY,
+    courses: [...byId.values()].slice(0, 40),
+    savedAt: Date.now(),
+  });
+}
+
+async function cachedCourseList(cacheKey) {
+  const hit = await readDirectoryRecord(cacheKey);
+  if (Array.isArray(hit?.courses) && hit.courses.length) return hit.courses;
+  const saved = await readDirectoryRecord(SAVED_COURSES_KEY);
+  return Array.isArray(saved?.courses) ? saved.courses : [];
+}
+
+/** Persist the course the golfer opened so it still loads with the network off. */
+export async function cacheSelectedCourse(course) {
+  if (!course?.id) return;
+  await rememberCourses([course]);
+}
+
+/** Courses previously downloaded into the-turn-course-cache. */
+export async function readCachedCourses() {
+  const saved = await readDirectoryRecord(SAVED_COURSES_KEY);
+  return Array.isArray(saved?.courses) ? saved.courses : [];
+}
+
 export async function searchNearbyGolfCourses({ lat, lon, query }) {
+  const cacheKey = directoryCacheKey(query, lat, lon);
+  const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+  if (offline) return cachedCourseList(cacheKey);
+
   let centerLat = lat;
   let centerLon = lon;
 
+  try {
   if (query && query.trim()) {
     const geoRes = await fetch(
       `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query.trim())}&limit=1`
     );
+    if (!geoRes.ok) throw new Error(`Nominatim ${geoRes.status}`);
     const geoData = await geoRes.json();
     if (Array.isArray(geoData) && geoData.length > 0) {
       centerLat = parseFloat(geoData[0].lat);
@@ -81,15 +181,15 @@ export async function searchNearbyGolfCourses({ lat, lon, query }) {
   }
 
   if (typeof centerLat !== 'number' || Number.isNaN(centerLat) || typeof centerLon !== 'number' || Number.isNaN(centerLon)) {
-    return [];
+    return cachedCourseList(cacheKey);
   }
 
-  const overpassQuery = `[out:json][timeout:12];(way["leisure"="golf_course"](around:25000,${centerLat},${centerLon});relation["leisure"="golf_course"](around:25000,${centerLat},${centerLon}););out center 12;`;
+  const overpassQuery = `[out:json][timeout:12];(way["leisure"="golf_course"](around:25000,${centerLat},${centerLon});relation["leisure"="golf_course"](around:25000,${centerLat},${centerLon});way["golf"="course"](around:25000,${centerLat},${centerLon});relation["golf"="course"](around:25000,${centerLat},${centerLon}););out center 12;`;
   const res = await fetch('https://overpass-api.de/api/interpreter', {
     method: 'POST',
     body: overpassQuery,
   });
-  if (!res.ok) return [];
+  if (!res.ok) throw new Error(`Overpass ${res.status}`);
   const data = await res.json();
 
   const seen = new Set();
@@ -118,7 +218,12 @@ export async function searchNearbyGolfCourses({ lat, lon, query }) {
     if (courses.length >= 8) break;
   }
 
+  await writeDirectoryRecord({ key: cacheKey, courses, savedAt: Date.now() });
+  await rememberCourses(courses);
   return courses;
+  } catch {
+    return cachedCourseList(cacheKey);
+  }
 }
 
 export async function fetchCourseWeather(lat, lon) {

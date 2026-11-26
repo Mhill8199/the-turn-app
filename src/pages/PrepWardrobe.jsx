@@ -1,6 +1,8 @@
 ﻿import { useState, useEffect } from 'react';
 import { Sparkles, Sliders, Image, Palette, Lock, RefreshCw, Check, Plus, Luggage } from 'lucide-react';
 import AddClosetModal from '../components/AddClosetModal';
+import WardrobeFlatLay from '../components/WardrobeFlatLay';
+import VirtualTryOnStudio from '../components/VirtualTryOnStudio';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 
@@ -36,6 +38,7 @@ export default function PrepWardrobe({ isPro = false, onOpenPaywall }) {
   });
   const [lockedIn, setLockedIn] = useState(false);
   const [addModalOpen, setAddModalOpen] = useState(false);
+  const [prepSurface, setPrepSurface] = useState('wardrobe');
 
   useEffect(() => {
     if (!user?.id) return;
@@ -111,7 +114,38 @@ export default function PrepWardrobe({ isPro = false, onOpenPaywall }) {
 
   return (
     <div className="space-y-4 pb-24">
-      <div className="rounded-2xl p-4 border" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
+      <div className="grid grid-cols-2 gap-2" role="tablist" aria-label="Prep mode">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={prepSurface === 'wardrobe'}
+          onClick={() => setPrepSurface('wardrobe')}
+          className={`min-h-[44px] rounded-xl text-sm font-semibold border ${
+            prepSurface === 'wardrobe' ? 'bg-emerald-700 text-white border-emerald-700' : ''
+          }`}
+          style={prepSurface !== 'wardrobe' ? { backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' } : {}}
+        >
+          Wardrobe
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={prepSurface === 'try-on'}
+          onClick={() => setPrepSurface('try-on')}
+          className={`min-h-[44px] rounded-xl text-sm font-semibold border ${
+            prepSurface === 'try-on' ? 'bg-emerald-700 text-white border-emerald-700' : ''
+          }`}
+          style={prepSurface !== 'try-on' ? { backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' } : {}}
+        >
+          Try-On
+        </button>
+      </div>
+
+      {prepSurface === 'try-on' ? (
+        <VirtualTryOnStudio />
+      ) : (
+      <>
+      <div className="rounded-3xl p-4 border" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
         <div className="flex items-center justify-between text-xs uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
           <span>Pre-Round Prep • Sat 7:00 AM</span>
           <span className="font-mono font-semibold" style={{ color: 'var(--accent-emerald)' }}>56°F → 74°F</span>
@@ -132,7 +166,7 @@ export default function PrepWardrobe({ isPro = false, onOpenPaywall }) {
         <div className="flex rounded-xl p-1 border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
           <button
             onClick={() => handleModeSwitch('easy')}
-            className={`flex-1 py-2 px-2 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition ${
+            className={`flex-1 min-h-[44px] py-2 px-2 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition ${
               mode === 'easy' ? 'bg-emerald-700 text-white shadow-sm' : ''
             }`}
           >
@@ -140,7 +174,7 @@ export default function PrepWardrobe({ isPro = false, onOpenPaywall }) {
           </button>
           <button
             onClick={() => handleModeSwitch('hard')}
-            className={`flex-1 py-2 px-2 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition ${
+            className={`flex-1 min-h-[44px] py-2 px-2 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition ${
               mode === 'hard' ? 'bg-emerald-700 text-white shadow-sm' : ''
             }`}
           >
@@ -151,7 +185,7 @@ export default function PrepWardrobe({ isPro = false, onOpenPaywall }) {
         <div className="flex rounded-xl p-1 border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
           <button
             onClick={() => handleVisualSwitch('no-pics')}
-            className={`flex-1 py-2 px-2 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition ${
+            className={`flex-1 min-h-[44px] py-2 px-2 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition ${
               visualMode === 'no-pics' ? 'bg-emerald-700 text-white shadow-sm' : ''
             }`}
           >
@@ -159,7 +193,7 @@ export default function PrepWardrobe({ isPro = false, onOpenPaywall }) {
           </button>
           <button
             onClick={() => handleVisualSwitch('pics')}
-            className={`flex-1 py-2 px-2 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition ${
+            className={`flex-1 min-h-[44px] py-2 px-2 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition ${
               visualMode === 'pics' ? 'bg-emerald-700 text-white shadow-sm' : ''
             }`}
           >
@@ -168,7 +202,7 @@ export default function PrepWardrobe({ isPro = false, onOpenPaywall }) {
         </div>
       </div>
 
-      <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
+      <div className="rounded-3xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>Weather</span>
           <div className="flex gap-1.5">
@@ -206,13 +240,23 @@ export default function PrepWardrobe({ isPro = false, onOpenPaywall }) {
         </div>
       </div>
 
-      <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
+      <div className="rounded-3xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-base">Recommended Lineup</h3>
           <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Syncs to Foursome</span>
         </div>
 
         <div className="space-y-2.5">
+          {closet.length === 0 && (
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+              Your closet is empty. Add a piece to build a lineup.
+            </p>
+          )}
+          {closet.length > 0 && activeOutfit.length === 0 && (
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+              No pieces match this weather and vibe yet. Add a piece to fill the lineup.
+            </p>
+          )}
           {activeOutfit.map((item) => (
             <div
               key={item.id}
@@ -262,7 +306,7 @@ export default function PrepWardrobe({ isPro = false, onOpenPaywall }) {
       </div>
 
       {mode === 'hard' && isPro && (
-        <div className="rounded-2xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-gold)' }}>
+        <div className="rounded-3xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-gold)' }}>
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent-gold)' }}>
             <Luggage size={15} /> Tour Stylist • 3-Day Golf Trip Capsule
           </div>
@@ -295,6 +339,9 @@ export default function PrepWardrobe({ isPro = false, onOpenPaywall }) {
           onSaved={(newItem) => setCloset((prev) => [newItem, ...prev])}
           onTriggerPaywall={(feat) => { setAddModalOpen(false); onOpenPaywall(feat); }}
         />
+      )}
+      <WardrobeFlatLay onLockOutfit={handleLockOutfit} />
+      </>
       )}
     </div>
   );
