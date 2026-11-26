@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   Wind,
   Droplets,
@@ -9,7 +9,6 @@ import {
   Sparkles,
   Watch,
   Glasses,
-  Navigation,
   Plus,
   X,
   Search,
@@ -24,21 +23,68 @@ import {
   COURSE_PRESETS,
   fetchCourseWeather,
   fetchElevationFt,
-  searchNearbyGolfCourses,
+  fetchCoursesNearPlayer,
+  searchGlobalGolfCourses,
   cacheSelectedCourse,
   readCachedCourses,
+  readCoursesCacheSync,
+  dedupeCourses,
+  courseDedupeKey,
+  courseMatchesQuery,
+  sortCoursesByDistance,
+  haversineMeters,
   degreesToCompass,
   calculateShotPhysics,
 } from '../lib/weatherPhysics';
 import SatelliteHoleMap from '../components/SatelliteHoleMap';
 import ActiveRoundFocus from '../components/ActiveRoundFocus';
-import { useUnits } from '../utils/distanceUnits';
+import { useUnits, YARDS_TO_METERS } from '../utils/distanceUnits';
+import { useTheme } from '../context/ThemeContext';
 import { useLanguage } from '../i18n/LanguageContext';
 import { buildWearablePayload, readCaddiePersonaId, resolveTtsLocale, speakCaddieCallout } from '../utils/wearableAndAudioCaddie';
 
 const CUSTOM_COURSES_KEY = 'the-turn-custom-courses';
+const RECENT_COURSES_KEY = 'the-turn-recent-courses';
 const SCORES_KEY = 'the-turn-scores-v2';
 const PINS_KEY = 'the-turn-miss-pins';
+
+function courseAliasKeys(course) {
+  const name = String(course?.name || '').toLowerCase().trim();
+  const lat = Number(course?.lat);
+  const lng = Number(course?.lng ?? course?.lon);
+  const latPart = Number.isFinite(lat) ? lat.toFixed(3) : 'na';
+  const lngPart = Number.isFinite(lng) ? lng.toFixed(3) : 'na';
+  return [courseDedupeKey(course), `${name}_${latPart}_${lngPart}`];
+}
+
+function CoursePickerRow({ course, selected, distanceLabel, onSelect }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(course)}
+      className="flex min-h-[44px] w-full items-center gap-2 rounded-2xl border daylight-border px-3 py-2 text-left"
+      style={{
+        backgroundColor: selected ? 'rgba(16,185,129,0.16)' : 'var(--bg-elevated)',
+        borderColor: selected ? '#10B981' : 'var(--border-subtle)',
+      }}
+    >
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-semibold">{course.name}</span>
+        {course.city ? (
+          <span className="block truncate text-[11px]" style={{ color: 'var(--text-secondary)' }}>{course.city}</span>
+        ) : null}
+      </span>
+      {distanceLabel ? (
+        <span
+          className="shrink-0 rounded-full px-2 py-1 text-[11px] font-semibold tabular-nums"
+          style={{ backgroundColor: 'rgba(16,185,129,0.18)', color: 'var(--accent-emerald)' }}
+        >
+          {distanceLabel}
+        </span>
+      ) : null}
+    </button>
+  );
+}
 
 const TEE_BOXES = [
   { id: 'tips', label: 'Tips', mult: 1.06, y: 294 },
@@ -131,13 +177,15 @@ function buildSatelliteTileGrid(lat, lon, zoom = 16) {
 
 export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall, onOpenWearable, onActiveHole }) {
   const { distanceUnit, formatDistance, formatSpeed } = useUnits();
+  const { theme } = useTheme();
   const { lang } = useLanguage();
   const [caddiePayload, setCaddiePayload] = useState(null);
   const caddieHoleArmed = useRef(false);
   const [customCourses, setCustomCourses] = useState(() => {
     try {
       const saved = localStorage.getItem(CUSTOM_COURSES_KEY);
-      return saved ? JSON.parse(saved) : [];
+      const parsed = saved ? JSON.parse(saved) : [];
+      return dedupeCourses(Array.isArray(parsed) ? parsed : []);
     } catch {
       return [];
     }
@@ -161,11 +209,11 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
     }
   });
 
-  const allCourses = [...customCourses, ...COURSE_PRESETS];
   const [courseId, setCourseId] = useState(() => {
     const savedHome = localStorage.getItem('the-turn-home-course');
-    if (savedHome && allCourses.some((c) => c.id === savedHome)) return savedHome;
-    return allCourses[0]?.id || COURSE_PRESETS[0].id;
+    const initialCourses = dedupeCourses([...customCourses, ...COURSE_PRESETS]);
+    if (savedHome && initialCourses.some((c) => c.id === savedHome)) return savedHome;
+    return initialCourses[0]?.id || COURSE_PRESETS[0].id;
   });
   const [holeIdx, setHoleIdx] = useState(0);
   const [teeId, setTeeId] = useState('blue');
@@ -221,23 +269,53 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
     windDirDeg: 145,
     isLive: false,
   });
+  const [cachedCourses, setCachedCourses] = useState(() => readCoursesCacheSync());
+  const [nearbyCourses, setNearbyCourses] = useState([]);
+  const [searchResults, setSearchResults] = useState([]);
+  const [playerGps, setPlayerGps] = useState(null);
+  const [pickerOpen, setPickerOpen] = useState(true);
+  const [offlineMode, setOfflineMode] = useState(() => typeof navigator !== 'undefined' && navigator.onLine === false);
+  const [recentCourses, setRecentCourses] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(RECENT_COURSES_KEY) || '[]');
+      return dedupeCourses(Array.isArray(saved) ? saved : []);
+    } catch {
+      return [];
+    }
+  });
+  const nearAbortRef = useRef(null);
+  const nearGen = useRef(0);
+
+  const allCourses = useMemo(
+    () => dedupeCourses([
+      ...customCourses,
+      ...recentCourses,
+      ...COURSE_PRESETS,
+      ...cachedCourses,
+      ...nearbyCourses,
+      ...searchResults,
+    ]),
+    [customCourses, recentCourses, cachedCourses, nearbyCourses, searchResults]
+  );
 
   useEffect(() => {
     localStorage.setItem(CUSTOM_COURSES_KEY, JSON.stringify(customCourses));
   }, [customCourses]);
 
   useEffect(() => {
-    if (typeof navigator !== 'undefined' && navigator.onLine !== false) return undefined;
     let cancelled = false;
     readCachedCourses().then((courses) => {
-      if (cancelled || !Array.isArray(courses) || courses.length === 0) return;
-      setCustomCourses((prev) => {
-        const ids = new Set(prev.map((course) => course.id));
-        const extra = courses.filter((course) => course?.id && !ids.has(course.id));
-        return extra.length ? [...extra, ...prev] : prev;
-      });
+      if (!cancelled && Array.isArray(courses)) setCachedCourses(dedupeCourses(courses));
     });
-    return () => { cancelled = true; };
+    const onOnline = () => setOfflineMode(false);
+    const onOffline = () => setOfflineMode(true);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
   }, []);
 
   useEffect(() => {
@@ -253,7 +331,17 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   useEffect(() => {
     cacheSelectedCourse(activeCourse);
   }, [activeCourse]);
-  const baseHole = activeCourse.holes[holeIdx] || activeCourse.holes[0];
+  const baseHole = activeCourse.holes?.[holeIdx] || activeCourse.holes?.[0] || {
+    number: 1,
+    par: 4,
+    yards: 390,
+    bearingDeg: 140,
+    bunkerStart: null,
+    bunkerEnd: null,
+    waterCarry: null,
+    greenSlope: 'Back-to-Front',
+    note: '',
+  };
   const activeTee = TEE_BOXES.find((t) => t.id === teeId) || TEE_BOXES[1];
 
   useEffect(() => {
@@ -303,93 +391,171 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
     return () => { cancelled = true; };
   }, [activeCourse.lat, activeCourse.lon]);
 
-  const handleCourseDirectorySearch = async (e) => {
-    e.preventDefault();
-    if (!courseSearch.trim()) return;
-    setSearchingCourses(true);
-    setGpsStatus(`Searching courses near "${courseSearch.trim()}"...`);
-    try {
-      const found = await searchNearbyGolfCourses({ query: courseSearch.trim() });
-      if (found.length > 0) {
-        setCustomCourses((prev) => {
-          const existingIds = new Set(prev.map((c) => c.id));
-          const uniqueNew = found.filter((c) => !existingIds.has(c.id));
-          return [...uniqueNew, ...prev];
-        });
-        setCourseId(found[0].id);
-        setHoleIdx(0);
-        setGpsStatus(`Found ${found.length} courses - loaded ${found[0].name} (${found[0].elevationFt} ft)`);
-      } else {
-        setGpsStatus(`No map courses found for "${courseSearch.trim()}" - tap + to add custom.`);
+  const rememberRecent = (course) => {
+    setRecentCourses((prev) => {
+      const next = dedupeCourses([course, ...prev]).slice(0, 12);
+      try {
+        localStorage.setItem(RECENT_COURSES_KEY, JSON.stringify(next));
+      } catch {
+        // Recent list is a convenience cache.
       }
-    } catch {
-      setGpsStatus('Course lookup timed out - try again or add custom.');
-    } finally {
-      setSearchingCourses(false);
+      return next;
+    });
+  };
+
+  const patchCourseElevation = (course, elevationFt) => {
+    const key = courseDedupeKey(course);
+    const apply = (list) => list.map((item) => (courseDedupeKey(item) === key ? { ...item, elevationFt } : item));
+    setCustomCourses(apply);
+    setNearbyCourses(apply);
+    setSearchResults(apply);
+    setCachedCourses(apply);
+    setRecentCourses((prev) => {
+      const next = apply(prev);
+      try {
+        localStorage.setItem(RECENT_COURSES_KEY, JSON.stringify(next));
+      } catch {
+        // Ignore quota failures.
+      }
+      return next;
+    });
+  };
+
+  const selectCourse = (course) => {
+    if (!course?.id) return;
+    const preset = COURSE_PRESETS.some((item) => item.id === course.id);
+    if (!preset) {
+      setCustomCourses((prev) => dedupeCourses([
+        course,
+        ...prev.filter((item) => courseDedupeKey(item) !== courseDedupeKey(course)),
+      ]));
+    }
+    setCourseId(course.id);
+    setHoleIdx(0);
+    rememberRecent(course);
+    cacheSelectedCourse(course);
+    if (!Number.isFinite(Number(course.elevationFt)) && Number.isFinite(Number(course.lat)) && Number.isFinite(Number(course.lon))) {
+      fetchElevationFt(course.lat, course.lon).then((elevationFt) => {
+        patchCourseElevation(course, elevationFt);
+        cacheSelectedCourse({ ...course, elevationFt });
+      });
     }
   };
 
-  const handleUseGps = async () => {
+  const loadNearbyCourses = useCallback(() => {
     if (!navigator.geolocation) {
-      setGpsStatus('Geolocation not supported in this browser.');
+      setGpsStatus('Geolocation is not available in this browser.');
+      setPickerOpen(true);
       return;
     }
+    const gen = nearGen.current + 1;
+    nearGen.current = gen;
     setGpsLoading(true);
-    setGpsStatus('Scanning GPS & nearby golf courses...');
-
+    setPickerOpen(true);
+    setGpsStatus('Finding courses near you...');
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
-        const lat = Number(pos.coords.latitude.toFixed(4));
-        const lon = Number(pos.coords.longitude.toFixed(4));
-        const elevFt = await fetchElevationFt(lat, lon);
-
+        if (nearGen.current !== gen) return;
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        setPlayerGps({ lat, lon });
+        nearAbortRef.current?.abort();
+        const controller = new AbortController();
+        nearAbortRef.current = controller;
         try {
-          const live = await fetchCourseWeather(lat, lon);
-          setWeather(live);
-        } catch {}
-
-        try {
-          const nearby = await searchNearbyGolfCourses({ lat, lon });
-          if (nearby.length > 0) {
-            setCustomCourses((prev) => {
-              const existingIds = new Set(prev.map((c) => c.id));
-              const uniqueNew = nearby.filter((c) => !existingIds.has(c.id));
-              return [...uniqueNew, ...prev];
-            });
-            setCourseId(nearby[0].id);
-            setHoleIdx(0);
-            setGpsStatus(`GPS Locked - Found ${nearby.length} nearby courses (${nearby[0].name})`);
-            setGpsLoading(false);
-            return;
-          }
-        } catch {}
-
-        const gpsCourseId = 'gps-live-spot';
-        const gpsCourse = {
-          id: gpsCourseId,
-          name: `GPS Pin (${lat}, ${lon})`,
-          city: 'Current Location',
-          lat,
-          lon,
-          elevationFt: elevFt,
-          holes: [
-            { number: 1, par: 4, yards: 390, bearingDeg: 140, bunkerStart: 250, bunkerEnd: 272, waterCarry: null, greenSlope: 'Back-to-Front', note: 'Live GPS pin spot - customize hole yardage & hazards anytime.' },
-            { number: 2, par: 3, yards: 168, bearingDeg: 215, bunkerStart: 152, bunkerEnd: 160, waterCarry: null, greenSlope: 'Firm & Fast', note: 'Check live wind & dew point before committing.' },
-          ],
-        };
-
-        setCustomCourses((prev) => [gpsCourse, ...prev.filter((c) => c.id !== gpsCourseId)]);
-        setCourseId(gpsCourseId);
-        setHoleIdx(0);
-        setGpsStatus(`Locked GPS (${lat}, ${lon}) - Elev ${elevFt} ft`);
-        setGpsLoading(false);
+          const nearby = await fetchCoursesNearPlayer(lat, lon, { signal: controller.signal });
+          if (controller.signal.aborted || nearGen.current !== gen) return;
+          setNearbyCourses(dedupeCourses(nearby));
+          const cached = await readCachedCourses();
+          if (!controller.signal.aborted && nearGen.current === gen) setCachedCourses(dedupeCourses(cached));
+          setGpsStatus(
+            nearby.length
+              ? `${nearby.length} courses within 25 miles`
+              : 'No mapped courses within 25 miles. Drop a pin to play this spot.'
+          );
+        } catch (error) {
+          if (error?.name === 'AbortError' || nearGen.current !== gen) return;
+          setGpsStatus('Nearby lookup failed. Saved courses still work offline.');
+        } finally {
+          if (nearGen.current === gen) setGpsLoading(false);
+        }
       },
       (err) => {
-        setGpsStatus(`GPS denied/unavailable: ${err.message}`);
+        if (nearGen.current !== gen) return;
+        setGpsStatus(`GPS denied or unavailable: ${err.message}`);
         setGpsLoading(false);
       },
-      { enableHighAccuracy: true, timeout: 10000 }
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 }
     );
+  }, []);
+
+  useEffect(() => {
+    loadNearbyCourses();
+    return () => nearAbortRef.current?.abort();
+  }, [loadNearbyCourses]);
+
+  useEffect(() => {
+    const q = courseSearch.trim();
+    if (q.length < 2) {
+      setSearchResults([]);
+      setSearchingCourses(false);
+      return undefined;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      setSearchingCourses(true);
+      try {
+        const found = await searchGlobalGolfCourses({
+          query: q,
+          signal: controller.signal,
+          lat: playerGps?.lat,
+          lon: playerGps?.lon,
+        });
+        if (controller.signal.aborted) return;
+        setSearchResults(dedupeCourses(found));
+        const cached = await readCachedCourses();
+        if (!controller.signal.aborted) setCachedCourses(dedupeCourses(cached));
+      } catch (error) {
+        if (error?.name === 'AbortError' || controller.signal.aborted) return;
+        setGpsStatus('Course search failed. Saved courses still work offline.');
+      } finally {
+        if (!controller.signal.aborted) setSearchingCourses(false);
+      }
+    }, 350);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [courseSearch, playerGps?.lat, playerGps?.lon]);
+
+  const handleDropPin = async () => {
+    const lat = Number(playerGps?.lat ?? activeCourse?.lat);
+    const lon = Number(playerGps?.lon ?? activeCourse?.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      setGpsStatus('Drop pin needs a GPS fix or a map center.');
+      return;
+    }
+    const elevationFt = await fetchElevationFt(lat, lon);
+    const pinned = {
+      id: `pin-${Date.now()}`,
+      name: 'Dropped Pin',
+      city: 'Custom pin',
+      lat: Number(lat.toFixed(5)),
+      lon: Number(lon.toFixed(5)),
+      elevationFt,
+      holes: [
+        { number: 1, par: 4, yards: 390, bearingDeg: 140, bunkerStart: 250, bunkerEnd: 272, waterCarry: null, greenSlope: 'Back-to-Front', note: 'Pinned course - customize hole yardage and hazards anytime.' },
+      ],
+    };
+    setNewCourseLat(pinned.lat);
+    setNewCourseLon(pinned.lon);
+    setNewCourseName(pinned.name);
+    setNewCourseCity(pinned.city);
+    setNewCourseElev(elevationFt);
+    setCreatorMode('course');
+    selectCourse(pinned);
+    setPickerOpen(false);
+    setGpsStatus(`Pinned course at ${pinned.lat}, ${pinned.lon}. Start the round, or rename it with +.`);
   };
 
   const handleSaveHole = (e) => {
@@ -399,7 +565,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
     const waterNum = Number(waterCarry) || null;
 
     const newHole = {
-      number: Number(holeNumber) || (activeCourse.holes.length + 1),
+      number: Number(holeNumber) || ((activeCourse.holes?.length || 0) + 1),
       par: Number(holePar) || 4,
       yards: yardsNum,
       bearingDeg: ((Number(holeBearing) % 360) + 360) % 360,
@@ -426,7 +592,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         c.id === activeCourse.id ? { ...c, holes: [...c.holes, newHole] } : c
       );
       setCustomCourses(updated);
-      setHoleIdx(activeCourse.holes.length);
+      setHoleIdx(activeCourse.holes?.length || 0);
     }
 
     setHoleNote('');
@@ -644,7 +810,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   let parForLogged = 0;
 
   loggedHoleNumbers.forEach((hNum) => {
-    const holeMeta = activeCourse.holes.find((h) => h.number === hNum) || { par: 4 };
+    const holeMeta = activeCourse.holes?.find((h) => h.number === hNum) || { par: 4 };
     const entry = courseScores[hNum];
     const st = typeof entry === 'number' ? entry : entry.strokes;
     const pt = typeof entry === 'number' ? 2 : entry.putts ?? 2;
@@ -734,6 +900,43 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
     );
   };
 
+  const distanceLabelFor = (course) => {
+    if (!playerGps) return '';
+    const meters = haversineMeters(playerGps.lat, playerGps.lon, course?.lat, course?.lon ?? course?.lng);
+    if (!Number.isFinite(meters)) return '';
+    return formatDistance(meters / YARDS_TO_METERS);
+  };
+  const queryText = courseSearch.trim();
+  const pinnedKeys = new Set();
+  const takeCourse = (course) => {
+    const aliases = courseAliasKeys(course);
+    if (aliases.some((key) => pinnedKeys.has(key))) return false;
+    aliases.forEach((key) => pinnedKeys.add(key));
+    return true;
+  };
+  const recentSaved = [];
+  const savedSource = dedupeCourses([
+    ...recentCourses,
+    ...customCourses,
+    ...COURSE_PRESETS,
+    ...(offlineMode || nearbyCourses.length === 0 ? cachedCourses : []),
+  ]);
+  for (const course of savedSource) {
+    if (!courseMatchesQuery(course, queryText) || !takeCourse(course)) continue;
+    recentSaved.push(course);
+  }
+  const nearbyList = [];
+  for (const course of sortCoursesByDistance(nearbyCourses, playerGps?.lat, playerGps?.lon)) {
+    if (!courseMatchesQuery(course, queryText) || !takeCourse(course)) continue;
+    nearbyList.push(course);
+  }
+  const globalList = [];
+  for (const course of sortCoursesByDistance(searchResults, playerGps?.lat, playerGps?.lon)) {
+    if (queryText.length < 2 || !courseMatchesQuery(course, queryText) || !takeCourse(course)) continue;
+    globalList.push(course);
+  }
+  const pickerSurface = theme === 'dark' ? '#0B0D0C' : 'var(--bg-surface)';
+
   if (isRoundActive) {
     const greenCenter = resolveGreenCenter(activeCourse, activeHole);
     const targetYards = Number.isFinite(Number(pinTarget?.yards)) ? Number(pinTarget.yards) : activeHole.yards;
@@ -798,7 +1001,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   }
 
   return (
-    <div className="space-y-4 pb-24">
+    <div className="space-y-4 pb-[max(6rem,env(safe-area-inset-bottom))]">
       <div className="rounded-3xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
         <button
           type="button"
@@ -811,61 +1014,51 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         >
           Start Round
         </button>
-        <form onSubmit={handleCourseDirectorySearch} className="flex items-center gap-1.5">
-          <div className="relative flex-1">
-            <Search size={13} className="absolute left-3 top-2.5 opacity-55" />
+        <div className="flex items-center gap-1.5">
+          <div className="relative min-w-0 flex-1">
+            <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 opacity-55" />
             <input
               type="text"
-              placeholder="Search city or course (e.g. Corona, CA)..."
+              placeholder="Search any golf course"
               value={courseSearch}
-              onChange={(e) => setCourseSearch(e.target.value)}
-              className="w-full rounded-xl pl-8 pr-3 py-1.5 text-xs border"
+              onChange={(e) => { setCourseSearch(e.target.value); setPickerOpen(true); }}
+              onFocus={() => setPickerOpen(true)}
+              className="min-h-[44px] w-full rounded-2xl border daylight-border py-2 pl-9 pr-3 text-sm"
               style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
             />
           </div>
-
-          <button
-            type="submit"
-            disabled={searchingCourses}
-            className="min-h-[44px] px-2.5 py-1.5 rounded-xl text-xs font-semibold border shrink-0"
-            style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
-          >
-            {searchingCourses ? <Loader2 size={13} className="animate-spin" /> : 'Find'}
-          </button>
-
           <button
             type="button"
-            onClick={handleUseGps}
+            onClick={loadNearbyCourses}
             disabled={gpsLoading}
-            className="min-h-[44px] px-2.5 py-1.5 rounded-xl text-xs font-semibold text-white flex items-center gap-1 shrink-0"
-            style={{ backgroundColor: 'var(--accent-emerald)' }}
+            className="flex min-h-[44px] shrink-0 items-center gap-1 rounded-2xl px-3 text-xs font-semibold text-white"
+            style={{ backgroundColor: '#10B981' }}
           >
-            <Navigation size={13} /> {gpsLoading ? '...' : 'GPS'}
+            {gpsLoading ? <Loader2 size={14} className="animate-spin" /> : <LocateFixed size={14} />}
+            Near Me
           </button>
-
           <button
             type="button"
             onClick={() => setCreatorOpen(!creatorOpen)}
-            className="min-h-[44px] min-w-[44px] px-2.5 py-1.5 rounded-xl text-xs font-semibold border flex items-center justify-center gap-1 shrink-0"
+            className="flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-2xl border daylight-border px-2.5 text-xs font-semibold"
             style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
           >
             {creatorOpen ? <X size={13} /> : <Plus size={13} />}
           </button>
-        </form>
+        </div>
 
         <div className="flex items-center justify-between gap-2">
-          <select
-            value={activeCourse.id}
-            onChange={(e) => { setCourseId(e.target.value); setHoleIdx(0); }}
-            className="font-bold text-sm rounded-xl px-3 py-2 border flex-1"
-            style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}
+          <button
+            type="button"
+            onClick={() => setPickerOpen((open) => !open)}
+            className="min-h-[44px] flex-1 rounded-2xl border daylight-border px-3 py-1.5 text-left"
+            style={{ backgroundColor: pickerSurface, borderColor: 'var(--border-subtle)', color: theme === 'dark' ? '#F3F4F1' : 'var(--text-primary)' }}
           >
-            {allCourses.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} ({c.elevationFt} ft)
-              </option>
-            ))}
-          </select>
+            <span className="block truncate text-sm font-bold">{activeCourse.name}</span>
+            <span className="block truncate text-[11px]" style={{ color: 'var(--text-secondary)' }}>
+              {activeCourse.city || 'Selected course'}
+            </span>
+          </button>
           <button
             type="button"
             onClick={() => setSimOpen(!simOpen)}
@@ -875,6 +1068,77 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
             <SlidersHorizontal size={11} /> {weather.isLive ? 'LIVE WX' : 'WHAT-IF'}
           </button>
         </div>
+
+        {pickerOpen && (
+          <div
+            className="max-h-80 space-y-3 overflow-y-auto rounded-2xl border daylight-border p-2"
+            style={{ backgroundColor: pickerSurface, borderColor: 'var(--border-subtle)' }}
+          >
+            <section className="space-y-1.5">
+              <p className="px-1 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>Recent & Saved Courses</p>
+              {recentSaved.length === 0 ? (
+                <p className="px-1 text-[11px]" style={{ color: 'var(--text-secondary)' }}>No saved matches yet.</p>
+              ) : recentSaved.map((course) => (
+                <CoursePickerRow
+                  key={`saved-${course.id}-${courseDedupeKey(course)}`}
+                  course={course}
+                  selected={course.id === activeCourse.id}
+                  distanceLabel={distanceLabelFor(course)}
+                  onSelect={selectCourse}
+                />
+              ))}
+            </section>
+            <section className="space-y-1.5">
+              <p className="px-1 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>Nearby Courses (GPS)</p>
+              {gpsLoading && nearbyList.length === 0 ? (
+                <p className="px-1 text-[11px]" style={{ color: 'var(--text-secondary)' }}>Locating courses within 25 miles...</p>
+              ) : null}
+              {!gpsLoading && nearbyList.length === 0 ? (
+                <p className="px-1 text-[11px]" style={{ color: 'var(--text-secondary)' }}>No mapped courses within 25 miles yet.</p>
+              ) : null}
+              {nearbyList.map((course) => (
+                <CoursePickerRow
+                  key={`near-${course.id}-${courseDedupeKey(course)}`}
+                  course={course}
+                  selected={course.id === activeCourse.id}
+                  distanceLabel={distanceLabelFor(course)}
+                  onSelect={selectCourse}
+                />
+              ))}
+            </section>
+            <section className="space-y-1.5">
+              <p className="px-1 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>Global Search Results</p>
+              {searchingCourses ? (
+                <p className="flex items-center gap-1 px-1 text-[11px]" style={{ color: 'var(--text-secondary)' }}>
+                  <Loader2 size={12} className="animate-spin" /> Searching courses...
+                </p>
+              ) : null}
+              {!searchingCourses && queryText.length < 2 ? (
+                <p className="px-1 text-[11px]" style={{ color: 'var(--text-secondary)' }}>Type a course or city to search the world.</p>
+              ) : null}
+              {!searchingCourses && queryText.length >= 2 && globalList.length === 0 ? (
+                <p className="px-1 text-[11px]" style={{ color: 'var(--text-secondary)' }}>No matches yet. Try another name or drop a pin.</p>
+              ) : null}
+              {globalList.map((course) => (
+                <CoursePickerRow
+                  key={`search-${course.id}-${courseDedupeKey(course)}`}
+                  course={course}
+                  selected={course.id === activeCourse.id}
+                  distanceLabel={distanceLabelFor(course)}
+                  onSelect={selectCourse}
+                />
+              ))}
+            </section>
+            <button
+              type="button"
+              onClick={handleDropPin}
+              className="min-h-[44px] w-full rounded-2xl border daylight-border px-3 text-left text-sm font-semibold"
+              style={{ borderColor: '#10B981', color: 'var(--accent-emerald)', backgroundColor: 'rgba(16,185,129,0.12)' }}
+            >
+              Can&apos;t find your course? Drop Pin on Map
+            </button>
+          </div>
+        )}
 
         <div className="flex items-center justify-between gap-1.5">
           <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>Tee Box</span>
@@ -902,7 +1166,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         )}
 
         <div className="flex gap-1.5 overflow-x-auto pb-1">
-          {activeCourse.holes.map((h, idx) => (
+          {(activeCourse.holes || []).map((h, idx) => (
             <button
               key={`${activeCourse.id}-${h.number}-${idx}`}
               onClick={() => setHoleIdx(idx)}
@@ -1179,7 +1443,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
 
         <div className="rounded-xl p-2.5 border text-center" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
           <Mountain size={14} className="mx-auto mb-1 opacity-75" />
-          <div className="font-mono font-bold text-sm tabular-nums">{activeCourse.elevationFt} ft</div>
+          <div className="font-mono font-bold text-sm tabular-nums">{Number.isFinite(Number(activeCourse.elevationFt)) ? `${activeCourse.elevationFt} ft` : '—'}</div>
           <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Elev</div>
         </div>
       </div>
@@ -1554,7 +1818,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
             <g transform="translate(184, 12)">
               <rect x="0" y="0" width="86" height="15" rx="4" fill="#060D09" fillOpacity="0.85" stroke="#34D399" strokeOpacity="0.4" strokeWidth="0.8" />
               <text x="43" y="10.5" textAnchor="middle" fontSize="7.5" fontFamily="monospace" fill="#6EE7B7">
-                {showRealSat ? `SAT ${satZoom}x` : 'VEC'} • {activeCourse.elevationFt}ft
+                {showRealSat ? `SAT ${satZoom}x` : 'VEC'} • {Number.isFinite(Number(activeCourse.elevationFt)) ? `${activeCourse.elevationFt}ft` : '—'}
               </text>
             </g>
           </svg>

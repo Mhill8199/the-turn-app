@@ -182,7 +182,7 @@ const QUALITY_MARKERS = [
 
 const ROBOTIC_MARKERS = ['compact', 'espeak', 'android default'];
 const FEMALE_MARKERS = ['ava', 'samantha', 'aria', 'female', 'zira'];
-const GLUED_UNIT_LANGS = new Set(['ja', 'zh']);
+const GLUED_UNIT_LANGS = new Set(['ja', 'zh', 'ko']);
 
 const ONES = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
 const TEENS = ['ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
@@ -629,22 +629,37 @@ export function speakCaddieCallout(payload, unit = 'yds', ttsLocale = 'en-US', p
     return Promise.resolve({ spoken: false, reason: 'unsupported' });
   }
 
-  return whenVoicesReady(apis.synth).then((voices) => {
-    if (token !== speakToken) return { spoken: false, reason: 'cancelled' };
+  return whenVoicesReady(apis.synth).then((voices) => new Promise((resolve) => {
+    if (token !== speakToken) {
+      resolve({ spoken: false, reason: 'cancelled' });
+      return;
+    }
+    let utterance;
     try {
-      if (typeof apis.synth.cancel === 'function') apis.synth.cancel();
-      const utterance = new apis.Utterance(text);
+      utterance = new apis.Utterance(text);
       utterance.lang = lang;
       utterance.rate = persona.rate;
       utterance.pitch = persona.pitch;
       const voice = selectCaddieVoice(voices, lang, persona);
       if (voice) utterance.voice = voice;
-      apis.synth.speak(utterance);
-      return { spoken: true, text, lang, personaId: persona.id };
     } catch {
-      return { spoken: false, reason: 'unsupported' };
+      resolve({ spoken: false, reason: 'unsupported' });
+      return;
     }
-  });
+    // Let cancel() finish before speak(); some engines drop an utterance started in the same turn.
+    setTimeout(() => {
+      if (token !== speakToken) {
+        resolve({ spoken: false, reason: 'cancelled' });
+        return;
+      }
+      try {
+        apis.synth.speak(utterance);
+        resolve({ spoken: true, text, lang, personaId: persona.id });
+      } catch {
+        resolve({ spoken: false, reason: 'unsupported' });
+      }
+    }, 0);
+  }));
 }
 
 /**
