@@ -331,6 +331,51 @@ function metersToYards(meters) {
   return meters / 0.9144;
 }
 
+function projectPoint(origin, bearingDeg, yards) {
+  const start = validPoint(origin);
+  if (!start || !Number.isFinite(yards)) return start;
+  const meters = yards * 0.9144;
+  const R = 6371000;
+  const br = (bearingDeg * Math.PI) / 180;
+  const lat1 = (start.lat * Math.PI) / 180;
+  const lon1 = (start.lon * Math.PI) / 180;
+  const ang = meters / R;
+  const lat2 = Math.asin(Math.sin(lat1) * Math.cos(ang) + Math.cos(lat1) * Math.sin(ang) * Math.cos(br));
+  const lon2 = lon1 + Math.atan2(
+    Math.sin(br) * Math.sin(ang) * Math.cos(lat1),
+    Math.cos(ang) - Math.sin(lat1) * Math.sin(lat2)
+  );
+  const lonDeg = ((lon2 * 180) / Math.PI + 540) % 360 - 180;
+  return { lat: (lat2 * 180) / Math.PI, lon: lonDeg };
+}
+
+function bearingBetween(a, b) {
+  const lat1 = (a.lat * Math.PI) / 180;
+  const lat2 = (b.lat * Math.PI) / 180;
+  const dLon = ((b.lon - a.lon) * Math.PI) / 180;
+  const y = Math.sin(dLon) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+/** Custom slippy fitBounds: center and zoom so every point sits inside the viewport. */
+function fitBounds(points, width, height) {
+  return fitView(points, width, height);
+}
+
+function arcPath(project, origin, bearing, yards, spreadDeg) {
+  let path = '';
+  const steps = 8;
+  for (let i = 0; i <= steps; i += 1) {
+    const delta = -spreadDeg + (2 * spreadDeg * i) / steps;
+    const point = projectPoint(origin, bearing + delta, yards);
+    if (!point) continue;
+    const screen = project(point.lat, point.lon);
+    path += `${i === 0 ? 'M' : 'L'}${screen.x.toFixed(1)} ${screen.y.toFixed(1)} `;
+  }
+  return path;
+}
+
 /** This map is a custom slippy view, not Leaflet. invalidateSize is used only if a Leaflet map was attached. */
 function leafletMapFrom(node) {
   if (!node) return null;
@@ -476,7 +521,13 @@ export default function SatelliteHoleMap({
   lon,
   holeNumber,
   onPinChange,
+  onShotsChange,
+  onLivePosition,
   fill = false,
+  clubUsed = '',
+  carryYards = null,
+  markRequest = null,
+  aimTarget = 'center',
 }) {
   const holeMeta = hole || (holeNumber != null ? { number: holeNumber } : null);
   const propLat = validPoint(holeMeta)?.lat ?? validPoint(center)?.lat ?? (Number.isFinite(Number(lat)) ? Number(lat) : null);
@@ -492,19 +543,36 @@ export default function SatelliteHoleMap({
   const [featureStatus, setFeatureStatus] = useState('Loading course features…');
   const [online, setOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine !== false));
   const [size, setSize] = useState({ width: 360, height: 320 });
+  const [shots, setShots] = useState([]);
+  const [liveGps, setLiveGps] = useState(null);
 
   const mapRef = useRef(null);
   const dragRef = useRef(null);
   const onPinChangeRef = useRef(onPinChange);
+  const onShotsChangeRef = useRef(onShotsChange);
+  const onLivePositionRef = useRef(onLivePosition);
   onPinChangeRef.current = onPinChange;
+  onShotsChangeRef.current = onShotsChange;
+  onLivePositionRef.current = onLivePosition;
   const viewCenterRef = useRef(viewCenter);
   const zoomRef = useRef(zoom);
   const sizeRef = useRef(size);
   const fitPointsRef = useRef([]);
   const fittedSizeRef = useRef({ width: 0, height: 0 });
+  const shotsRef = useRef([]);
+  const liveRef = useRef(null);
+  const startRef = useRef(null);
+  const teeRef = useRef(null);
+  const greenRef = useRef(null);
+  const clubRef = useRef(clubUsed);
+  const recordShotRef = useRef(() => {});
+  const markIdRef = useRef(null);
   viewCenterRef.current = viewCenter;
   zoomRef.current = zoom;
   sizeRef.current = size;
+  shotsRef.current = shots;
+  liveRef.current = liveGps;
+  clubRef.current = clubUsed;
 
   const holeLat = validPoint(hole)?.lat ?? null;
   const holeLon = validPoint(hole)?.lon ?? null;
@@ -518,8 +586,30 @@ export default function SatelliteHoleMap({
     }),
     [holeMeta, holeLat, holeLon, centerLat, centerLon, features]
   );
-  fitPointsRef.current = corridorPoints;
-  const corridorKey = `${holeNumber ?? hole?.number ?? ''}|${corridorPoints.map((point) => `${point.lat.toFixed(5)},${point.lon.toFixed(5)}`).join('|')}`;
+  const coursePoint = centerLat != null && centerLon != null ? { lat: centerLat, lon: centerLon } : DOCUMENTED_DEFAULT;
+  const explicitGreen = validPoint({ lat: hole?.greenLat, lon: hole?.greenLon })
+    || (holeLat != null && holeLon != null ? { lat: holeLat, lon: holeLon } : null);
+  const holeYards = Number(hole?.yards);
+  const holeBearing = Number(hole?.bearingDeg);
+  const teePoint = validPoint(origin) || coursePoint;
+  // Without a surveyed green, project the scorecard yardage from the tee/course coordinate along the hole bearing.
+  const greenCenter = explicitGreen || (
+    Number.isFinite(holeYards) && Number.isFinite(holeBearing)
+      ? projectPoint(teePoint, holeBearing, holeYards)
+      : coursePoint
+  );
+  greenRef.current = greenCenter;
+  teeRef.current = validPoint(origin) || coursePoint;
+  if (validPoint(origin)) startRef.current = validPoint(origin);
+
+  const lastShot = shots[shots.length - 1];
+  const framePoints = [
+    ...corridorPoints,
+    greenCenter,
+    ...(lastShot && Number.isFinite(Number(lastShot.lat)) ? [{ lat: Number(lastShot.lat), lon: Number(lastShot.lng) }] : []),
+  ];
+  fitPointsRef.current = framePoints;
+  const corridorKey = `${holeNumber ?? hole?.number ?? ''}|${framePoints.map((point) => `${point.lat.toFixed(5)},${point.lon.toFixed(5)}`).join('|')}`;
 
   useEffect(() => {
     if (!fill) {
@@ -529,6 +619,79 @@ export default function SatelliteHoleMap({
     setPin(null);
     onPinChangeRef.current?.(null);
   }, [propLat, propLon, courseName, hole?.number, holeNumber, fill]);
+
+  useEffect(() => {
+    if (!fill) return undefined;
+    shotsRef.current = [];
+    setShots([]);
+    onShotsChangeRef.current?.([]);
+    setPin(null);
+  }, [fill, courseName, hole?.number, holeNumber]);
+
+  useEffect(() => {
+    if (!fill || typeof navigator === 'undefined' || !navigator.geolocation) return undefined;
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const next = validPoint({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+        if (!next) return;
+        if (!startRef.current) startRef.current = next;
+        liveRef.current = next;
+        setLiveGps(next);
+        onLivePositionRef.current?.({ lat: next.lat, lon: next.lon, lng: next.lon });
+      },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 }
+    );
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [fill]);
+
+  recordShotRef.current = (point, clubOverride, notifyPin = true) => {
+    const lie = validPoint(point);
+    if (!lie) return;
+    const prevShots = shotsRef.current;
+    const previous = prevShots.length
+      ? { lat: Number(prevShots[prevShots.length - 1].lat), lon: Number(prevShots[prevShots.length - 1].lng) }
+      : teeRef.current || validPoint(origin) || lie;
+    const green = greenRef.current || lie;
+    const distanceFromPrev = Math.round(metersToYards(haversineMeters(previous, lie)));
+    const remainingToCenter = Math.round(metersToYards(haversineMeters(lie, green)));
+    const shot = {
+      shotNumber: prevShots.length + 1,
+      lat: lie.lat,
+      lng: lie.lon,
+      clubUsed: clubOverride || clubRef.current || '—',
+      distanceFromPrev,
+      remainingToCenter,
+    };
+    const next = [...prevShots, shot];
+    shotsRef.current = next;
+    setShots(next);
+    onShotsChangeRef.current?.(next);
+    if (notifyPin) {
+      onPinChangeRef.current?.({
+        lat: lie.lat,
+        lon: lie.lon,
+        yards: remainingToCenter,
+        meters: remainingToCenter * 0.9144,
+      });
+    }
+    const layout = sizeRef.current;
+    const fit = fitBounds([lie, green, ...(startRef.current ? [startRef.current] : [])], layout.width, layout.height);
+    fittedSizeRef.current = { width: layout.width, height: layout.height };
+    setViewCenter(fit.center);
+    setZoom(fit.zoom);
+  };
+
+  useEffect(() => {
+    if (!fill || !markRequest?.id || markRequest.id === markIdRef.current) return;
+    markIdRef.current = markRequest.id;
+    const last = shotsRef.current[shotsRef.current.length - 1];
+    const point = liveRef.current
+      || (last ? { lat: last.lat, lon: last.lng } : null)
+      || validPoint(origin)
+      || viewCenterRef.current;
+    recordShotRef.current(point, markRequest.club);
+  }, [fill, markRequest, origin]);
 
   useEffect(() => {
     const on = () => setOnline(true);
@@ -566,7 +729,7 @@ export default function SatelliteHoleMap({
         Math.abs(height - prevSize.height) >= 8;
       if (reason === 'resize' && !jumped) return;
 
-      const fit = fitView(fitPointsRef.current, width, height);
+      const fit = fitBounds(fitPointsRef.current, width, height);
       fittedSizeRef.current = { width, height };
       setViewCenter(fit.center);
       setZoom(fit.zoom);
@@ -721,6 +884,7 @@ export default function SatelliteHoleMap({
       yards: metersToYards(meters),
       meters,
     });
+    if (fill) recordShotRef.current(nextPin, undefined, false);
   };
 
   const useMyGps = () => {
@@ -750,6 +914,42 @@ export default function SatelliteHoleMap({
 
   const originScreen = view.project(measuredFrom.lat, measuredFrom.lon);
   const pinScreen = pin ? view.project(pin.lat, pin.lon) : null;
+  const ballPoint = lastShot && Number.isFinite(Number(lastShot.lat))
+    ? { lat: Number(lastShot.lat), lon: Number(lastShot.lng) }
+    : liveGps;
+  const aimBearingBase = Number.isFinite(holeBearing)
+    ? holeBearing
+    : (ballPoint && greenCenter ? bearingBetween(ballPoint, greenCenter) : 0);
+  const targetPoint = aimTarget === 'front'
+    ? projectPoint(greenCenter, aimBearingBase + 180, 12)
+    : aimTarget === 'back'
+      ? projectPoint(greenCenter, aimBearingBase, 14)
+      : greenCenter;
+  const ballScreen = ballPoint ? view.project(ballPoint.lat, ballPoint.lon) : null;
+  const targetScreen = targetPoint ? view.project(targetPoint.lat, targetPoint.lon) : null;
+  const liveScreen = liveGps ? view.project(liveGps.lat, liveGps.lon) : null;
+  const shotScreens = shots.map((shot) => ({
+    ...shot,
+    ...view.project(Number(shot.lat), Number(shot.lng)),
+  }));
+  const carry = Number(carryYards);
+  const aimBearing = ballPoint && targetPoint ? bearingBetween(ballPoint, targetPoint) : null;
+  const shotPath = shotScreens.length
+    ? shotScreens.map((shot, index) => `${index === 0 ? 'M' : 'L'}${shot.x.toFixed(1)} ${shot.y.toFixed(1)}`).join(' ')
+    : '';
+
+  const frameGps = () => {
+    const points = [];
+    if (liveRef.current) points.push(liveRef.current);
+    if (greenRef.current) points.push(greenRef.current);
+    const last = shotsRef.current[shotsRef.current.length - 1];
+    if (last) points.push({ lat: Number(last.lat), lon: Number(last.lng) });
+    if (!points.length) return;
+    const fit = fitBounds(points, sizeRef.current.width, sizeRef.current.height);
+    fittedSizeRef.current = { width: sizeRef.current.width, height: sizeRef.current.height };
+    setViewCenter(fit.center);
+    setZoom(fit.zoom);
+  };
 
   const modeToggle = (
     <div
@@ -854,7 +1054,7 @@ export default function SatelliteHoleMap({
             const end = view.project(ring[ring.length - 1].lat, ring[ring.length - 1].lon);
             return <circle key={`${feature.id}-pin`} cx={end.x} cy={end.y} r="4.5" fill="#FBBF24" stroke="#111827" strokeWidth="1.2" />;
           })}
-          {pinScreen && (
+          {pinScreen && !fill && (
             <g>
               <line
                 x1={originScreen.x}
@@ -869,11 +1069,64 @@ export default function SatelliteHoleMap({
               <circle cx={pinScreen.x} cy={pinScreen.y} r="6" fill="#EF4444" stroke="#fff" strokeWidth="1.6" />
             </g>
           )}
+          {fill && ballPoint && aimBearing != null && Number.isFinite(carry) && carry > 0 && (
+            <g fill="none" stroke="#10B981" strokeWidth="1.25" opacity="0.55">
+              <path d={arcPath(view.project, ballPoint, aimBearing, carry, 18)} />
+              <path d={arcPath(view.project, ballPoint, aimBearing, Math.max(10, carry * 0.82), 12)} strokeDasharray="3 3" opacity="0.8" />
+            </g>
+          )}
+          {fill && shotPath && (
+            <path d={shotPath} fill="none" stroke="#D4AF37" strokeWidth="2.6" strokeLinejoin="round" strokeLinecap="round" />
+          )}
+          {fill && shotScreens.map((shot) => (
+            <g key={`shot-${shot.shotNumber}`}>
+              <circle cx={shot.x} cy={shot.y} r="9" fill="#D4AF37" stroke="#0B0D0C" strokeWidth="1.4" />
+              <text x={shot.x} y={shot.y + 3.5} textAnchor="middle" fontSize="10" fontWeight="700" fill="#0B0D0C">{shot.shotNumber}</text>
+            </g>
+          ))}
+          {fill && ballScreen && targetScreen && (
+            <line
+              x1={ballScreen.x}
+              y1={ballScreen.y}
+              x2={targetScreen.x}
+              y2={targetScreen.y}
+              stroke="#10B981"
+              strokeWidth="1.6"
+              strokeDasharray="5 4"
+            />
+          )}
+          {fill && liveScreen && (
+            <g>
+              <circle cx={liveScreen.x} cy={liveScreen.y} r="14" fill="#10B981" opacity="0.35">
+                <animate attributeName="r" values="8;18;8" dur="1.6s" repeatCount="indefinite" />
+                <animate attributeName="opacity" values="0.5;0.08;0.5" dur="1.6s" repeatCount="indefinite" />
+              </circle>
+              <circle cx={liveScreen.x} cy={liveScreen.y} r="6" fill="#10B981" stroke="#fff" strokeWidth="1.5" />
+            </g>
+          )}
         </svg>
 
         {fill && (
-          <div className="absolute left-3 z-10 top-[calc(env(safe-area-inset-top)+4.75rem)]">
+          <div
+            className="absolute left-3 z-10 flex flex-col gap-1.5 top-[calc(env(safe-area-inset-top)+4.75rem)]"
+            onPointerDown={(event) => event.stopPropagation()}
+          >
             {modeToggle}
+            <button
+              type="button"
+              onClick={() => recordShotRef.current(liveRef.current || ballPoint || viewCenterRef.current)}
+              className="min-h-[44px] rounded-2xl bg-[#0B0D0C]/85 px-2.5 text-[11px] font-semibold text-white backdrop-blur-md"
+            >
+              Log Shot
+            </button>
+            <button
+              type="button"
+              onClick={frameGps}
+              aria-label="Re-center on GPS"
+              className="min-h-[44px] rounded-2xl bg-[#0B0D0C]/85 px-2.5 text-[11px] font-semibold text-[#10B981] backdrop-blur-md"
+            >
+              GPS
+            </button>
           </div>
         )}
 

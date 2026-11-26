@@ -55,6 +55,33 @@ const PIN_TYPES = [
 
 const SAT_ZOOM_LEVELS = [15, 16, 17];
 
+function destinationPoint(origin, bearingDeg, yards) {
+  const lat = Number(origin?.lat);
+  const lon = Number(origin?.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(Number(yards))) return null;
+  const meters = Number(yards) * 0.9144;
+  const R = 6371000;
+  const br = ((Number(bearingDeg) || 0) * Math.PI) / 180;
+  const lat1 = (lat * Math.PI) / 180;
+  const lon1 = (lon * Math.PI) / 180;
+  const ang = meters / R;
+  const lat2 = Math.asin(Math.sin(lat1) * Math.cos(ang) + Math.cos(lat1) * Math.sin(ang) * Math.cos(br));
+  const lon2 = lon1 + Math.atan2(Math.sin(br) * Math.sin(ang) * Math.cos(lat1), Math.cos(ang) - Math.sin(lat1) * Math.sin(lat2));
+  return { lat: (lat2 * 180) / Math.PI, lon: (((lon2 * 180) / Math.PI + 540) % 360) - 180 };
+}
+
+function resolveGreenCenter(course, hole) {
+  const greenLat = Number(hole?.greenLat);
+  const greenLon = Number(hole?.greenLon);
+  if (Number.isFinite(greenLat) && Number.isFinite(greenLon)) return { lat: greenLat, lon: greenLon };
+  const holeLat = Number(hole?.lat);
+  const holeLon = Number(hole?.lon);
+  if (Number.isFinite(holeLat) && Number.isFinite(holeLon)) return { lat: holeLat, lon: holeLon };
+  const projected = destinationPoint({ lat: course?.lat, lon: course?.lon }, hole?.bearingDeg, hole?.yards);
+  if (projected) return projected;
+  return { lat: Number(course?.lat), lon: Number(course?.lon) };
+}
+
 function calcGpsYards(lat1, lon1, lat2, lon2) {
   const R = 6371000;
   const toRad = (deg) => (deg * Math.PI) / 180;
@@ -177,6 +204,11 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
 
   const [isRoundActive, setIsRoundActive] = useState(false);
   const [pinTarget, setPinTarget] = useState(null);
+  const [roundShots, setRoundShots] = useState([]);
+  const [liveRoundGps, setLiveRoundGps] = useState(null);
+  const [markRequest, setMarkRequest] = useState(null);
+  const [suggestedClub, setSuggestedClub] = useState({ name: '', carry: null });
+  const [aimTarget, setAimTarget] = useState('center');
   const roundActiveRef = useRef(false);
   roundActiveRef.current = isRoundActive;
 
@@ -243,6 +275,13 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   useEffect(() => {
     setPinTarget(null);
   }, [activeCourse.id, activeHole.number, teeId]);
+
+  useEffect(() => {
+    setRoundShots([]);
+    setLiveRoundGps(null);
+    setMarkRequest(null);
+    setAimTarget('center');
+  }, [activeCourse.id, activeHole.number, isRoundActive]);
 
   useEffect(() => {
     setHoleNumber((activeCourse.holes?.length || 0) + 1);
@@ -694,6 +733,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   };
 
   if (isRoundActive) {
+    const greenCenter = resolveGreenCenter(activeCourse, activeHole);
     const targetYards = Number.isFinite(Number(pinTarget?.yards)) ? Number(pinTarget.yards) : activeHole.yards;
     return (
       <ActiveRoundFocus
@@ -706,13 +746,25 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         onNext={() => setHoleIdx((idx) => Math.min((activeCourse.holes?.length || 1) - 1, idx + 1))}
         onEndRound={() => {
           setPinTarget(null);
+          setRoundShots([]);
+          setLiveRoundGps(null);
+          setMarkRequest(null);
           setIsRoundActive(false);
         }}
-        centerYards={targetYards}
+        onMarkShot={(club) => setMarkRequest({ id: Date.now(), club })}
+        onSuggestedClub={(next) => {
+          setSuggestedClub((prev) => (prev?.name === next?.name && prev?.carry === next?.carry ? prev : next));
+        }}
+        onAimTarget={(next) => setAimTarget((prev) => (prev === next ? prev : next))}
+        centerYards={activeHole.yards}
         pinYards={targetYards}
+        greenCenter={greenCenter}
         windSpeedMph={weather?.windSpeedMph}
         windDirDeg={weather?.windDirDeg}
         holeBearingDeg={activeHole.bearingDeg}
+        elevationFt={activeCourse.elevationFt}
+        shots={roundShots}
+        livePosition={liveRoundGps}
         clubs={clubs}
         suggestion={activeHole.note || aimAdvice}
       >
@@ -725,9 +777,19 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
             par: activeHole.par,
             lat: activeHole.lat,
             lon: activeHole.lon,
+            yards: activeHole.yards,
+            bearingDeg: activeHole.bearingDeg,
+            greenLat: activeHole.greenLat ?? greenCenter?.lat,
+            greenLon: activeHole.greenLon ?? greenCenter?.lon,
           }}
           origin={shotStartGps ? { lat: shotStartGps.lat, lon: shotStartGps.lon } : undefined}
           onPinChange={setPinTarget}
+          onShotsChange={setRoundShots}
+          onLivePosition={setLiveRoundGps}
+          clubUsed={suggestedClub?.name || ''}
+          carryYards={suggestedClub?.carry}
+          markRequest={markRequest}
+          aimTarget={aimTarget}
         />
       </ActiveRoundFocus>
     );
