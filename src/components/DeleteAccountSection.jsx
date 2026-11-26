@@ -6,6 +6,7 @@ const KNOWN_APP_DATABASES = [
   'the-turn-photo-vault',
   'the-turn-vault-keys',
   'the-turn-course-cache',
+  'the-turn-global-courses',
 ];
 
 function clearTurnLocalStorage() {

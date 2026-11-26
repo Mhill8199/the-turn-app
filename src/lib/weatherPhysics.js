@@ -1,57 +1,14 @@
-export const COURSE_PRESETS = [
-  {
-    id: 'dos-lagos',
-    name: 'Dos Lagos Golf Club',
-    city: 'Corona, CA',
-    lat: 33.8139,
-    lon: -117.5156,
-    elevationFt: 740,
-    holes: [
-      { number: 1, par: 4, yards: 388, bearingDeg: 145, bunkerStart: 245, bunkerEnd: 268, waterCarry: null, greenSlope: 'Back-to-Front', note: 'Favor left-center; right bunker gathers anything leaking right.' },
-      { number: 2, par: 5, yards: 518, bearingDeg: 210, bunkerStart: 275, bunkerEnd: 295, waterCarry: 185, greenSlope: 'Two-Tier Back', note: 'Lay up to 95-105 yds short of the creek unless tailwind is 10+ mph.' },
-      { number: 3, par: 3, yards: 164, bearingDeg: 310, bunkerStart: 148, bunkerEnd: 156, waterCarry: null, greenSlope: 'Slopes Left', note: 'Plays half a club longer into the afternoon canyon breeze.' },
-      { number: 4, par: 4, yards: 392, bearingDeg: 95, bunkerStart: 252, bunkerEnd: 278, waterCarry: null, greenSlope: 'Firm & Fast', note: '3-Wood or hybrid off the tee takes the 252y right bunker out of play.' },
-      { number: 5, par: 4, yards: 424, bearingDeg: 180, bunkerStart: 260, bunkerEnd: 285, waterCarry: null, greenSlope: 'Elevated Front', note: 'Take one extra club to reach the upper shelf.' },
-    ],
-  },
-  {
-    id: 'oak-valley',
-    name: 'Oak Valley Golf Club',
-    city: 'Beaumont, CA',
-    lat: 33.9384,
-    lon: -117.0186,
-    elevationFt: 2610,
-    holes: [
-      { number: 1, par: 4, yards: 405, bearingDeg: 110, bunkerStart: 255, bunkerEnd: 275, waterCarry: null, greenSlope: 'Fast Front-to-Back', note: '2,600 ft elevation adds ~4% carry. Keep approach below the hole.' },
-      { number: 2, par: 4, yards: 376, bearingDeg: 265, bunkerStart: 235, bunkerEnd: 255, waterCarry: null, greenSlope: 'Ridge Center', note: 'Downwind afternoon tee shot runs out fast.' },
-      { number: 3, par: 3, yards: 182, bearingDeg: 20, bunkerStart: 165, bunkerEnd: 174, waterCarry: null, greenSlope: 'Deep Green', note: 'Check wind gusts over the ridge before pulling a club.' },
-    ],
-  },
-  {
-    id: 'glen-ivy',
-    name: 'Glen Ivy Golf Club',
-    city: 'Corona, CA',
-    lat: 33.7512,
-    lon: -117.4925,
-    elevationFt: 1180,
-    holes: [
-      { number: 1, par: 4, yards: 368, bearingDeg: 160, bunkerStart: 240, bunkerEnd: 260, waterCarry: null, greenSlope: 'Gentle Tilt', note: 'Position drive at 235-245y for a flat wedge angle.' },
-      { number: 2, par: 3, yards: 152, bearingDeg: 240, bunkerStart: 138, bunkerEnd: 146, waterCarry: null, greenSlope: 'Front Bunker', note: 'Do not miss short right.' },
-    ],
-  },
-  {
-    id: 'yucaipa-valley',
-    name: 'Yucaipa Valley Golf Club',
-    city: 'Yucaipa, CA',
-    lat: 34.0175,
-    lon: -117.0431,
-    elevationFt: 2480,
-    holes: [
-      { number: 1, par: 4, yards: 382, bearingDeg: 195, bunkerStart: 235, bunkerEnd: 255, waterCarry: null, greenSlope: 'Back-to-Front', note: '2,480 ft elevation gives ~3.5% extra carry off the first tee.' },
-      { number: 2, par: 3, yards: 158, bearingDeg: 120, bunkerStart: 142, bunkerEnd: 150, waterCarry: null, greenSlope: 'Slopes Left', note: 'Stay below the pin on the back-left shelf.' },
-    ],
-  },
-];
+import {
+  rememberGlobalCourses,
+  STARTER_COURSES,
+  searchNearbyGolfCourses as searchCatalogCourses,
+  readCachedCourses as readGlobalCachedCourses,
+} from '../utils/globalCourseCatalog';
+
+/** Offline starter courses. Live search merges with this list and is not capped by it. */
+export const COURSE_PRESETS = STARTER_COURSES;
+
+export { searchCatalogCourses as searchNearbyGolfCourses, readGlobalCachedCourses as readCachedCourses };
 
 export async function fetchElevationFt(lat, lon) {
   try {
@@ -68,14 +25,6 @@ export async function fetchElevationFt(lat, lon) {
 const COURSE_CACHE_DB = 'the-turn-course-cache';
 const COURSE_CACHE_STORE = 'courses';
 const SAVED_COURSES_KEY = 'directory|saved-courses';
-
-function directoryCacheKey(query, lat, lon) {
-  if (query && String(query).trim()) return `directory|q|${String(query).trim().toLowerCase()}`;
-  const la = Number(lat);
-  const lo = Number(lon);
-  if (!Number.isFinite(la) || !Number.isFinite(lo)) return 'directory|unknown';
-  return `directory|gps|${la.toFixed(2)},${lo.toFixed(2)}`;
-}
 
 function openCourseDirectoryDb() {
   return new Promise((resolve, reject) => {
@@ -135,95 +84,16 @@ async function rememberCourses(courses) {
   }
   await writeDirectoryRecord({
     key: SAVED_COURSES_KEY,
-    courses: [...byId.values()].slice(0, 40),
+    courses: [...byId.values()],
     savedAt: Date.now(),
   });
-}
-
-async function cachedCourseList(cacheKey) {
-  const hit = await readDirectoryRecord(cacheKey);
-  if (Array.isArray(hit?.courses) && hit.courses.length) return hit.courses;
-  const saved = await readDirectoryRecord(SAVED_COURSES_KEY);
-  return Array.isArray(saved?.courses) ? saved.courses : [];
 }
 
 /** Persist the course the golfer opened so it still loads with the network off. */
 export async function cacheSelectedCourse(course) {
   if (!course?.id) return;
   await rememberCourses([course]);
-}
-
-/** Courses previously downloaded into the-turn-course-cache. */
-export async function readCachedCourses() {
-  const saved = await readDirectoryRecord(SAVED_COURSES_KEY);
-  return Array.isArray(saved?.courses) ? saved.courses : [];
-}
-
-export async function searchNearbyGolfCourses({ lat, lon, query }) {
-  const cacheKey = directoryCacheKey(query, lat, lon);
-  const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
-  if (offline) return cachedCourseList(cacheKey);
-
-  let centerLat = lat;
-  let centerLon = lon;
-
-  try {
-  if (query && query.trim()) {
-    const geoRes = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query.trim())}&limit=1`
-    );
-    if (!geoRes.ok) throw new Error(`Nominatim ${geoRes.status}`);
-    const geoData = await geoRes.json();
-    if (Array.isArray(geoData) && geoData.length > 0) {
-      centerLat = parseFloat(geoData[0].lat);
-      centerLon = parseFloat(geoData[0].lon);
-    }
-  }
-
-  if (typeof centerLat !== 'number' || Number.isNaN(centerLat) || typeof centerLon !== 'number' || Number.isNaN(centerLon)) {
-    return cachedCourseList(cacheKey);
-  }
-
-  const overpassQuery = `[out:json][timeout:12];(way["leisure"="golf_course"](around:25000,${centerLat},${centerLon});relation["leisure"="golf_course"](around:25000,${centerLat},${centerLon});way["golf"="course"](around:25000,${centerLat},${centerLon});relation["golf"="course"](around:25000,${centerLat},${centerLon}););out center 12;`;
-  const res = await fetch('https://overpass-api.de/api/interpreter', {
-    method: 'POST',
-    body: overpassQuery,
-  });
-  if (!res.ok) throw new Error(`Overpass ${res.status}`);
-  const data = await res.json();
-
-  const seen = new Set();
-  const courses = [];
-
-  for (const el of data.elements || []) {
-    const name = el.tags?.name;
-    const cLat = el.center?.lat ?? el.lat;
-    const cLon = el.center?.lon ?? el.lon;
-    if (!name || !cLat || !cLon || seen.has(name)) continue;
-    seen.add(name);
-
-    const elevFt = await fetchElevationFt(cLat, cLon);
-    courses.push({
-      id: `osm-${el.id}`,
-      name,
-      city: el.tags?.['addr:city'] || 'Nearby Course',
-      lat: Number(cLat.toFixed(4)),
-      lon: Number(cLon.toFixed(4)),
-      elevationFt: elevFt,
-      holes: [
-        { number: 1, par: 4, yards: 392, bearingDeg: 145, bunkerStart: 245, bunkerEnd: 268, waterCarry: null, greenSlope: 'Back-to-Front', note: 'Live weather, dew point & wind active - customize hole specs with +.' },
-        { number: 2, par: 3, yards: 165, bearingDeg: 220, bunkerStart: 148, bunkerEnd: 156, waterCarry: null, greenSlope: 'Firm & Fast', note: 'Check wind vector and dew point rollout before pulling a club.' },
-      ],
-    });
-    if (courses.length >= 8) break;
-  }
-
-  await writeDirectoryRecord({ key: cacheKey, courses, savedAt: Date.now() });
-  await rememberCourses(courses);
-  return courses;
-  } catch {
-    return cachedCourseList(cacheKey);
-  }
+  await rememberGlobalCourses([course]);
 }
 
 export async function fetchCourseWeather(lat, lon) {
