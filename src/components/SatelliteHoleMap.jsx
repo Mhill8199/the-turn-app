@@ -359,33 +359,33 @@ function bearingBetween(a, b) {
   return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
 }
 
-/** Clockwise screen rotation that brings `bearingDeg` (clockwise from north) to the top of the map. */
-function rotateScreen(x, y, width, height, bearingDeg) {
+/** CSS rotate: positive degrees are clockwise and screen y grows downward. */
+function rotateScreen(x, y, width, height, angleDeg) {
   const dx = x - width / 2;
   const dy = y - height / 2;
-  const a = ((Number(bearingDeg) || 0) * Math.PI) / 180;
+  const a = ((Number(angleDeg) || 0) * Math.PI) / 180;
   const c = Math.cos(a);
   const s = Math.sin(a);
-  return { x: width / 2 + dx * c + dy * s, y: height / 2 - dx * s + dy * c };
+  return { x: width / 2 + dx * c - dy * s, y: height / 2 + dx * s + dy * c };
 }
 
-function inverseRotate(dx, dy, bearingDeg) {
-  const a = ((Number(bearingDeg) || 0) * Math.PI) / 180;
+function inverseRotate(dx, dy, angleDeg) {
+  const a = ((Number(angleDeg) || 0) * Math.PI) / 180;
   const c = Math.cos(a);
   const s = Math.sin(a);
-  return { dx: dx * c - dy * s, dy: dx * s + dy * c };
+  return { dx: dx * c + dy * s, dy: -dx * s + dy * c };
 }
 
-function rotatedOffset(center, point, zoom, bearingDeg) {
+function rotatedOffset(center, point, zoom, angleDeg) {
   const viewZoom = clampZoom(zoom);
   const nativeZ = Math.min(viewZoom, MAX_NATIVE_ZOOM);
   const scale = 2 ** (viewZoom - nativeZ);
   const dx = (lonToTileX(point.lon, nativeZ) - lonToTileX(center.lon, nativeZ)) * TILE_SIZE * scale;
   const dy = (latToTileY(point.lat, nativeZ) - latToTileY(center.lat, nativeZ)) * TILE_SIZE * scale;
-  const a = ((Number(bearingDeg) || 0) * Math.PI) / 180;
+  const a = ((Number(angleDeg) || 0) * Math.PI) / 180;
   const c = Math.cos(a);
   const s = Math.sin(a);
-  return { x: dx * c + dy * s, y: -dx * s + dy * c };
+  return { x: dx * c - dy * s, y: dx * s + dy * c };
 }
 
 /** Tee/GPS sits near the bottom, green near the top, hole bearing aimed up the screen. */
@@ -408,8 +408,8 @@ function frameHoleView(lie, green, width, height) {
   const padBottom = Math.max(120, safeH * 0.24);
   let chosen = MIN_ZOOM;
   for (let z = MAX_NATIVE_ZOOM; z >= MIN_ZOOM; z -= 1) {
-    const lieDelta = rotatedOffset(center, start, z, bearing);
-    const greenDelta = rotatedOffset(center, end, z, bearing);
+    const lieDelta = rotatedOffset(center, start, z, -bearing);
+    const greenDelta = rotatedOffset(center, end, z, -bearing);
     const lieY = safeH / 2 + lieDelta.y;
     const greenY = safeH / 2 + greenDelta.y;
     const minX = safeW / 2 + Math.min(lieDelta.x, greenDelta.x);
@@ -817,6 +817,9 @@ export default function SatelliteHoleMap({
       (pos) => {
         const next = validPoint({ lat: pos.coords.latitude, lon: pos.coords.longitude });
         if (!next) return;
+        const anchors = [teeRef.current, greenRef.current].filter((point) => validPoint(point));
+        const onHole = !anchors.length || anchors.some((point) => metersToYards(haversineMeters(next, point)) <= 2000);
+        if (!onHole) return;
         if (!startRef.current) startRef.current = next;
         liveRef.current = next;
         setLiveGps(next);
@@ -1088,7 +1091,7 @@ export default function SatelliteHoleMap({
     drag.lastY = event.clientY;
     if (!drag.moved) return;
     const currentSize = sizeRef.current;
-    const local = inverseRotate(dx, dy, headingRef.current);
+    const local = inverseRotate(dx, dy, -headingRef.current);
     setViewCenter((current) => makeView(current, zoomRef.current, currentSize.width, currentSize.height).pan(local.dx, local.dy));
   };
 
@@ -1098,7 +1101,7 @@ export default function SatelliteHoleMap({
     const layout = sizeRef.current;
     const x = ((event.clientX - rect.left) / rect.width) * layout.width;
     const y = ((event.clientY - rect.top) / rect.height) * layout.height;
-    const local = inverseRotate(x - layout.width / 2, y - layout.height / 2, headingRef.current);
+    const local = inverseRotate(x - layout.width / 2, y - layout.height / 2, -headingRef.current);
     return makeView(viewCenterRef.current, zoomRef.current, layout.width, layout.height).unproject(
       local.dx + layout.width / 2,
       local.dy + layout.height / 2
@@ -1246,7 +1249,7 @@ export default function SatelliteHoleMap({
   const aimLineBearing = lieForAim && reticle ? bearingBetween(lieForAim, reticle) : heading;
   const spreadAlong = Math.max(3.5, (Number(leg1Yards) || 0) * 0.03);
   const spreadLateral = Math.max(2.5, (Number(leg1Yards) || 0) * ((Number(leg1Yards) || 0) > 220 ? 0.065 : 0.04));
-  const upright = (point) => (point ? rotateScreen(point.x, point.y, size.width, size.height, fill ? heading : 0) : null);
+  const upright = (point) => (point ? rotateScreen(point.x, point.y, size.width, size.height, fill ? -heading : 0) : null);
   const lieUp = upright(lieUnrot);
   const reticleUp = upright(reticleUnrot);
   const greenUp = upright(greenUnrot);
@@ -1336,7 +1339,7 @@ export default function SatelliteHoleMap({
       >
         <div
           className="pointer-events-none absolute inset-0 origin-center"
-          style={{ transform: `rotate(${fill ? heading : 0}deg)` }}
+          style={{ transform: `rotate(${fill ? -heading : 0}deg)` }}
         >
         {mode === 'satellite' && view.tiles.map((tile) => (
           <img
@@ -1419,7 +1422,7 @@ export default function SatelliteHoleMap({
             <path d={shotPath} fill="none" stroke="#D4AF37" strokeWidth="2.6" strokeLinejoin="round" strokeLinecap="round" />
           )}
           {fill && shotScreens.map((shot) => (
-            <g key={`shot-${shot.shotNumber}`} transform={`rotate(${-heading} ${shot.x} ${shot.y})`}>
+            <g key={`shot-${shot.shotNumber}`} transform={`rotate(${heading} ${shot.x} ${shot.y})`}>
               <circle cx={shot.x} cy={shot.y} r="9" fill="#D4AF37" stroke="#0B0D0C" strokeWidth="1.4" />
               <text x={shot.x} y={shot.y + 3.5} textAnchor="middle" fontSize="10" fontWeight="700" fill="#0B0D0C">{shot.shotNumber}</text>
             </g>
