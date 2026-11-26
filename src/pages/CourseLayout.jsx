@@ -42,6 +42,7 @@ import { useUnits, YARDS_TO_METERS } from '../utils/distanceUnits';
 import { useTheme } from '../context/ThemeContext';
 import { useLanguage } from '../i18n/LanguageContext';
 import { buildWearablePayload, readCaddiePersonaId, resolveTtsLocale, speakCaddieCallout } from '../utils/wearableAndAudioCaddie';
+import { activeBagClubs, clubSpecSubtitle } from '../utils/bagClubs';
 
 const CUSTOM_COURSES_KEY = 'the-turn-custom-courses';
 const RECENT_COURSES_KEY = 'the-turn-recent-courses';
@@ -218,7 +219,10 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   const [holeIdx, setHoleIdx] = useState(0);
   const [teeId, setTeeId] = useState('blue');
   const [activePinType, setActivePinType] = useState('target');
-  const [selectedClubId, setSelectedClubId] = useState(clubs[1]?.id || clubs[0]?.id || '1');
+  const [selectedClubId, setSelectedClubId] = useState(() => {
+    const active = activeBagClubs(clubs);
+    return active[1]?.id || active[0]?.id || '1';
+  });
   const [courseSearch, setCourseSearch] = useState('');
   const [searchingCourses, setSearchingCourses] = useState(false);
   const [gpsStatus, setGpsStatus] = useState('');
@@ -660,7 +664,8 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
     setMissPins((prev) => ({ ...prev, [holePinKey]: [] }));
   };
 
-  const evaluatedClubs = clubs.map((club) => {
+  const suggestionClubs = activeBagClubs(clubs);
+  const evaluatedClubs = suggestionClubs.map((club) => {
     const physics = calculateShotPhysics({
       stockCarry: club.carry_yards,
       stockTotal: club.total_yards,
@@ -970,7 +975,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         elevationFt={activeCourse.elevationFt}
         shots={roundShots}
         livePosition={liveRoundGps}
-        clubs={clubs}
+        clubs={suggestionClubs}
         suggestion={activeHole.note || aimAdvice}
       >
         <SatelliteHoleMap
@@ -1461,6 +1466,9 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
             <div className="font-bold text-sm tabular-nums">
               Pull {bestClub.club_type} ({formatDistance(bestClub.effectiveCarry)} carry / {formatDistance(bestClub.effectiveTotal)} total)
             </div>
+            {clubSpecSubtitle(bestClub) ? (
+              <div className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>{clubSpecSubtitle(bestClub)}</div>
+            ) : null}
             <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
               {aimAdvice} - {activeHole.par === 3 ? `Green: ${activeHole.greenSlope}` : `Leaves ${formatDistance(bestClub.remainingToPin)} in`}
             </div>
@@ -1839,7 +1847,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               <button
                 key={club.id}
                 onClick={() => {
-                  if (!isPro && club.id !== clubs[0]?.id && club.id !== bestClub?.id) {
+                  if (!isPro && club.id !== suggestionClubs[0]?.id && club.id !== bestClub?.id) {
                     onOpenPaywall('Full-Bag Interactive Shot Simulation');
                     return;
                   }
@@ -1851,6 +1859,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
                 style={activeClub.id !== club.id ? { borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' } : {}}
               >
                 <div>{club.club_type}</div>
+                {clubSpecSubtitle(club) ? <div className="text-[10px] font-normal opacity-70">{clubSpecSubtitle(club)}</div> : null}
                 <div className="text-[10px] font-mono opacity-80 tabular-nums">Stock {formatDistance(club.carry_yards)} -&gt; {formatDistance(club.effectiveCarry)}</div>
               </button>
             ))}

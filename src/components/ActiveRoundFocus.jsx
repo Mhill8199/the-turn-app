@@ -10,22 +10,7 @@ import {
   saveCaddiePersonaId,
   speakCaddieCallout,
 } from '../utils/wearableAndAudioCaddie';
-
-function closestClub(clubs, playsLikeYards) {
-  const list = Array.isArray(clubs) ? clubs : [];
-  let best = null;
-  let bestDiff = Infinity;
-  for (const club of list) {
-    const carry = Number(club?.carry_yards);
-    if (!Number.isFinite(carry)) continue;
-    const diff = Math.abs(carry - playsLikeYards);
-    if (diff < bestDiff) {
-      best = club;
-      bestDiff = diff;
-    }
-  }
-  return best;
-}
+import { closestActiveClub, clubSpecSubtitle } from '../utils/bagClubs';
 
 /** Headwind is wind blowing into the shot (positive). Tailwind is negative. */
 function relativeWind(windSpeedMph, windDirDeg, holeBearingDeg) {
@@ -150,8 +135,9 @@ export default function ActiveRoundFocus({
   // Headwind adds yards, tailwind subtracts. Course elevation adds about 2 yards per 1,000 ft when provided.
   const elevationDelta = Number.isFinite(Number(elevationFt)) ? Math.round(Number(elevationFt) / 500) : 0;
   const playsLikeYards = Math.max(0, Math.round((Number(centerDist) || 0) + deltaYards + lieAdjust + elevationDelta));
-  const matched = closestClub(clubs, playsLikeYards);
+  const matched = closestActiveClub(clubs, playsLikeYards);
   const clubName = matched?.club_type || matched?.name || fallbackClubName || '—';
+  const clubSpec = clubSpecSubtitle(matched);
   const clubCarry = matched ? Number(matched.carry_yards) : Number(fallbackCarryYards);
   const deltaLabel = `${deltaYards > 0 ? '+' : ''}${deltaYards}`;
   const ttsLocale = resolveTtsLocale(lang);
@@ -274,6 +260,7 @@ export default function ActiveRoundFocus({
             <div className="min-w-0 text-right">
               <div className="text-[10px] font-semibold uppercase tracking-wider text-[#10B981]">Suggested Club</div>
               <div className="truncate text-sm font-bold leading-tight">{clubName}</div>
+              {clubSpec ? <div className="truncate text-[10px] font-normal text-white/65">{clubSpec}</div> : null}
             </div>
             <button
               type="button"

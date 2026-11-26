@@ -5,6 +5,7 @@ import SatelliteHoleMap from './SatelliteHoleMap';
 import { useLanguage } from '../i18n/LanguageContext';
 import { useUnits } from '../utils/distanceUnits';
 import { buildWearablePayload, readCaddiePersonaId, resolveTtsLocale, speakCaddieCallout } from '../utils/wearableAndAudioCaddie';
+import { activeBagClubs, closestActiveClub, clubSpecSubtitle } from '../utils/bagClubs';
 
 export default function OnCourseHoleHUD({
   holeNumber: initialHole = 1,
@@ -30,6 +31,10 @@ export default function OnCourseHoleHUD({
   const yardage = Number(playsLikeYards) || 385;
   const targetYards = Number.isFinite(Number(pinTarget?.yards)) ? Number(pinTarget.yards) : yardage;
   const hasCoords = Number.isFinite(Number(lat)) && Number.isFinite(Number(lon));
+  const playableClubs = activeBagClubs(clubs);
+  const matchedClub = closestActiveClub(playableClubs, yardage);
+  const suggestedName = matchedClub?.club_type || recommendedClub;
+  const suggestedSpec = clubSpecSubtitle(matchedClub);
 
   useEffect(() => {
     setPinTarget(null);
@@ -40,18 +45,18 @@ export default function OnCourseHoleHUD({
       unit,
       targetYards: yardage,
       playsLikeYards: yardage,
-      club: recommendedClub,
+      club: suggestedName,
       holeNumber,
       par,
       wind: windNote,
       advice: actualYards != null ? `Actual ${actualYards}` : '',
       ttsLocale,
     }));
-  }, [unit, yardage, actualYards, recommendedClub, holeNumber, par, windNote, ttsLocale]);
+  }, [unit, yardage, actualYards, suggestedName, holeNumber, par, windNote, ttsLocale]);
 
   const playCallout = () => {
     speakCaddieCallout(
-      { holeNumber, club: recommendedClub, targetYards: yardage, wind: windNote },
+      { holeNumber, club: suggestedName, targetYards: yardage, wind: windNote },
       unit,
       ttsLocale,
       readCaddiePersonaId()
@@ -74,8 +79,8 @@ export default function OnCourseHoleHUD({
         centerYards={targetYards}
         pinYards={targetYards}
         windSpeedMph={0}
-        clubs={clubs}
-        fallbackClubName={recommendedClub}
+        clubs={playableClubs}
+        fallbackClubName={suggestedName}
         suggestion={windNote}
       >
         {hasCoords ? (
@@ -124,7 +129,8 @@ export default function OnCourseHoleHUD({
         <div className={`text-xs text-emerald-300 ${tabularNumsClass}`}>Center of green • Actual {formatDistance(actualYards)}</div>
         <div className="p-5 rounded-3xl border-2 border-emerald-500 bg-emerald-950/30 space-y-2">
           <div className="text-xs uppercase tracking-widest text-amber-400">Recommended Club</div>
-          <div className="text-4xl font-black text-white">{recommendedClub}</div>
+          <div className="text-4xl font-black text-white">{suggestedName}</div>
+          {suggestedSpec ? <div className="text-xs text-emerald-200/70">{suggestedSpec}</div> : null}
           <div className="text-sm text-emerald-300 tabular-nums">{windNote}</div>
         </div>
 
