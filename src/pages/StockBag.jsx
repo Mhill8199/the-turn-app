@@ -233,7 +233,7 @@ export default function StockBag({ clubs, setClubs }) {
     const existing = (Array.isArray(clubs) ? clubs : []).find((club) => club.id === sheet.editingId) || null;
     const parsedCarry = inputToYards(carryDraft, distanceUnit);
     const carry = parsedCarry == null ? Number(existing?.carry_yards) || Number(sheet.carryYards) || 0 : parsedCarry;
-    const loftNum = Number(sheet.loft);
+    const loftNum = sheet.loft === '' || sheet.loft == null ? null : Number(sheet.loft);
     const loft = Number.isFinite(loftNum) ? loftNum : (existing?.loft ?? null);
     const manufacturer = (sheet.customManufacturer.trim() || sheet.manufacturer || '').trim();
     const model = sheet.model.trim();
@@ -365,7 +365,7 @@ export default function StockBag({ clubs, setClubs }) {
               {club.loft == null || club.loft === '' ? 'Loft —' : `${club.loft}°`} · {club.bounce_grind || 'Std'}
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-1.5">
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
             <button
               type="button"
               onClick={() => openEdit(club)}
