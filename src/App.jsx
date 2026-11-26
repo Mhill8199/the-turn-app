@@ -19,6 +19,10 @@ import DeleteAccountSection from './components/DeleteAccountSection';
 
 import React, { useState, useEffect } from 'react';
 
+const stripePublishableKey = String(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY ?? '').trim();
+const stripeLiveMode = stripePublishableKey.startsWith('pk_live_');
+const stripeTestMode = stripePublishableKey.length === 0 || stripePublishableKey.startsWith('pk_test_');
+
 function SmartGlassesHud({ clubs }) {
   const [targetYards, setTargetYards] = useState(165);
   const best = [...clubs].sort(
@@ -192,6 +196,8 @@ export default function App() {
 const handleStartCheckout = async () => {
     setCheckoutError('');
 
+    if (!stripeLiveMode) return;
+
     if (!user) {
       setPaywallFeature(null);
       setAuthOpen(true);
@@ -254,7 +260,7 @@ const handleStartCheckout = async () => {
   }
 
   const studentPassActive = Boolean(studentPass?.verified) && Boolean(studentPass?.expiresAt) && new Date(studentPass.expiresAt) > new Date();
-  const isPro = profile?.tier === 'tour_pro' || demoPro || studentPassActive;
+  const isPro = profile?.tier === 'tour_pro' || demoPro || studentPassActive || profile?.is_beta_tester === true;
   const leadClub = clubs[1] || clubs[0];
 
   return (
@@ -501,6 +507,19 @@ const handleStartCheckout = async () => {
               </button>
             </div>
 
+            {stripeTestMode && (
+              <p
+                className="text-[11px] font-medium leading-snug inline-flex w-fit max-w-full items-center px-2 py-1 rounded-md border"
+                style={{
+                  color: 'var(--text-secondary)',
+                  borderColor: 'rgba(180, 83, 9, 0.55)',
+                  backgroundColor: 'var(--bg-elevated)',
+                }}
+              >
+                Stripe Test Mode — No Real Charges
+              </p>
+            )}
+
             <div>
               <h3 className="text-lg font-bold">{paywallFeature}</h3>
               <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
@@ -585,12 +604,18 @@ const handleStartCheckout = async () => {
               </p>
             )}
 
+            {!stripeLiveMode && (
+              <p className="text-[11px] leading-snug" style={{ color: 'var(--text-secondary)' }}>
+                Live checkout is unavailable in test mode.
+              </p>
+            )}
+
             <div className="flex gap-2 pt-1">
               <button
                 type="button"
-                disabled={checkoutLoading}
-                onClick={handleStartCheckout}
-                className="flex-1 py-3 rounded-xl font-semibold text-sm text-white flex items-center justify-center gap-1.5"
+                disabled={checkoutLoading || !stripeLiveMode}
+                onClick={stripeLiveMode ? handleStartCheckout : undefined}
+                className="flex-1 min-h-[44px] py-3 rounded-xl font-semibold text-sm text-white flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ backgroundColor: 'var(--accent-emerald)' }}
               >
                 {checkoutLoading ? (
@@ -619,7 +644,11 @@ const handleStartCheckout = async () => {
         </div>
       )}
 
-      <BetaGateAndFeedback activeTab={activeTab} holeNumber={activeTab === 'course' ? courseHole : null} />
+      <BetaGateAndFeedback
+        activeTab={activeTab}
+        holeNumber={activeTab === 'course' ? courseHole : null}
+        onRequireAuth={() => setAuthOpen(true)}
+      />
 
       <nav
         className="app-bottom-nav sticky bottom-0 z-20 border-t px-2 pt-2 pb-[env(safe-area-inset-bottom)] grid grid-cols-4 gap-1 backdrop-blur-md"

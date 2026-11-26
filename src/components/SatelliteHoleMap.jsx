@@ -90,10 +90,10 @@ function makeView(center, zoom, width, height) {
   if (w > 1 && h > 1) {
     const halfW = w / (2 * scale);
     const halfH = h / (2 * scale);
-    const tx0 = Math.floor((cx - halfW) / TILE_SIZE) - 1;
-    const tx1 = Math.floor((cx + halfW) / TILE_SIZE) + 1;
-    const ty0 = Math.floor((cy - halfH) / TILE_SIZE) - 1;
-    const ty1 = Math.floor((cy + halfH) / TILE_SIZE) + 1;
+    const tx0 = Math.floor((cx - halfW) / TILE_SIZE) - 2;
+    const tx1 = Math.floor((cx + halfW) / TILE_SIZE) + 2;
+    const ty0 = Math.floor((cy - halfH) / TILE_SIZE) - 2;
+    const ty1 = Math.floor((cy + halfH) / TILE_SIZE) + 2;
     for (let tx = tx0; tx <= tx1; tx += 1) {
       for (let ty = ty0; ty <= ty1; ty += 1) {
         if (ty < 0 || ty >= n) continue;
@@ -105,9 +105,9 @@ function makeView(center, zoom, width, height) {
           y: (ty * TILE_SIZE - cy) * scale + h / 2,
           size: TILE_SIZE * scale,
         });
-        if (tiles.length >= 64) break;
+        if (tiles.length >= 200) break;
       }
-      if (tiles.length >= 64) break;
+      if (tiles.length >= 200) break;
     }
   }
 
@@ -234,6 +234,14 @@ async function writeCourseCache(record) {
   });
 }
 
+function numericRef(tags = {}) {
+  const raw = tags.ref ?? tags['golf:ref'] ?? tags['golf:hole'] ?? '';
+  const match = String(raw).match(/\d+/);
+  if (!match) return null;
+  const value = Number(match[0]);
+  return Number.isFinite(value) ? value : null;
+}
+
 function kindFromTags(tags = {}) {
   if (tags.golf === 'green') return 'green';
   if (tags.golf === 'bunker') return 'bunker';
@@ -273,6 +281,7 @@ function parseOverpass(data) {
     features.push({
       id: `${element.type}:${element.id}:${kind}`,
       kind,
+      ref: numericRef(element.tags || {}),
       rings,
     });
     if (features.length >= 400) break;
@@ -320,6 +329,83 @@ function haversineMeters(a, b) {
 /** 1 yard = 0.9144 m, so yards = meters / 0.9144. */
 function metersToYards(meters) {
   return meters / 0.9144;
+}
+
+/** This map is a custom slippy view, not Leaflet. invalidateSize is used only if a Leaflet map was attached. */
+function leafletMapFrom(node) {
+  if (!node) return null;
+  const attached = node._leaflet_map || node.leafletMap || null;
+  if (attached && typeof attached.invalidateSize === 'function') return attached;
+  return null;
+}
+
+/** Fit the tee-to-green corridor. A lone course center uses zoom 18. */
+function fitView(points, width, height) {
+  const list = (points || []).map((point) => validPoint(point)).filter(Boolean);
+  const only = list[0] || DOCUMENTED_DEFAULT;
+  const safeW = Math.max(1, width);
+  const safeH = Math.max(1, height);
+  if (list.length < 2) return { center: only, zoom: 18 };
+
+  let minLat = 90;
+  let maxLat = -90;
+  let minLon = 180;
+  let maxLon = -180;
+  for (const point of list) {
+    minLat = Math.min(minLat, point.lat);
+    maxLat = Math.max(maxLat, point.lat);
+    minLon = Math.min(minLon, point.lon);
+    maxLon = Math.max(maxLon, point.lon);
+  }
+  const center = { lat: (minLat + maxLat) / 2, lon: (minLon + maxLon) / 2 };
+  const span = haversineMeters({ lat: minLat, lon: minLon }, { lat: maxLat, lon: maxLon });
+  if (span < 40) return { center, zoom: 18 };
+
+  const pad = 64;
+  let chosen = MIN_ZOOM;
+  for (let z = 19; z >= MIN_ZOOM; z -= 1) {
+    const lonSpan = Math.abs(lonToTileX(maxLon, z) - lonToTileX(minLon, z)) * TILE_SIZE;
+    const latSpan = Math.abs(latToTileY(minLat, z) - latToTileY(maxLat, z)) * TILE_SIZE;
+    if (lonSpan <= safeW - pad && latSpan <= safeH - pad) {
+      chosen = z;
+      break;
+    }
+  }
+  return { center, zoom: clampZoom(chosen) };
+}
+
+function collectCorridorPoints({ hole, center, features }) {
+  const holePoint = validPoint(hole);
+  const course = validPoint(center) || holePoint || DOCUMENTED_DEFAULT;
+  const holeNumber = Number(hole?.number);
+  const kinds = new Set(['hole', 'green']);
+  let pool = [];
+  if (Number.isFinite(holeNumber)) {
+    pool = (features || []).filter((feature) => kinds.has(feature.kind) && Number(feature.ref) === holeNumber);
+  }
+  if (!pool.length && holePoint) {
+    pool = (features || []).filter((feature) => {
+      if (!kinds.has(feature.kind)) return false;
+      const start = feature.rings?.[0]?.[0];
+      return start && haversineMeters(holePoint, start) < 450;
+    });
+  }
+  const points = [];
+  const add = (point) => {
+    const valid = validPoint(point);
+    if (valid) points.push(valid);
+  };
+  for (const feature of pool) {
+    for (const ring of feature.rings || []) {
+      if (!ring?.length) continue;
+      add(ring[0]);
+      add(ring[Math.floor(ring.length / 2)]);
+      add(ring[ring.length - 1]);
+    }
+  }
+  add(holePoint);
+  if (points.length >= 2) return points;
+  return [course];
 }
 
 function featureStyle(kind, schematic) {
@@ -414,19 +500,35 @@ export default function SatelliteHoleMap({
   const viewCenterRef = useRef(viewCenter);
   const zoomRef = useRef(zoom);
   const sizeRef = useRef(size);
+  const fitPointsRef = useRef([]);
+  const fittedSizeRef = useRef({ width: 0, height: 0 });
   viewCenterRef.current = viewCenter;
   zoomRef.current = zoom;
   sizeRef.current = size;
 
+  const holeLat = validPoint(hole)?.lat ?? null;
+  const holeLon = validPoint(hole)?.lon ?? null;
+  const centerLat = validPoint(center)?.lat ?? (Number.isFinite(Number(lat)) ? Number(lat) : null);
+  const centerLon = validPoint(center)?.lon ?? (Number.isFinite(Number(lon)) ? Number(lon) : null);
+  const corridorPoints = useMemo(
+    () => collectCorridorPoints({
+      hole: holeLat != null && holeLon != null ? { ...holeMeta, lat: holeLat, lon: holeLon } : { number: holeMeta?.number },
+      center: centerLat != null && centerLon != null ? { lat: centerLat, lon: centerLon } : null,
+      features,
+    }),
+    [holeMeta, holeLat, holeLon, centerLat, centerLon, features]
+  );
+  fitPointsRef.current = corridorPoints;
+  const corridorKey = `${holeNumber ?? hole?.number ?? ''}|${corridorPoints.map((point) => `${point.lat.toFixed(5)},${point.lon.toFixed(5)}`).join('|')}`;
+
   useEffect(() => {
-    if (propLat != null && propLon != null) {
-      setViewCenter({ lat: propLat, lon: propLon });
-    } else {
-      setViewCenter(resolveCenter(null, null));
+    if (!fill) {
+      if (propLat != null && propLon != null) setViewCenter({ lat: propLat, lon: propLon });
+      else setViewCenter(resolveCenter(null, null));
     }
     setPin(null);
     onPinChangeRef.current?.(null);
-  }, [propLat, propLon, courseName, hole?.number, holeNumber]);
+  }, [propLat, propLon, courseName, hole?.number, holeNumber, fill]);
 
   useEffect(() => {
     const on = () => setOnline(true);
@@ -442,17 +544,46 @@ export default function SatelliteHoleMap({
   useLayoutEffect(() => {
     const el = mapRef.current;
     if (!el) return undefined;
-    const measure = () => {
+
+    // Remeasure the slippy viewport. Leaflet maps, if one was attached, get invalidateSize().
+    // The full-screen round refits the tee-to-green corridor; the setup card only remeasures.
+    const resizeAndRecenter = (reason) => {
+      const leafletMap = leafletMapFrom(el);
+      if (leafletMap) leafletMap.invalidateSize(false);
+
       const rect = el.getBoundingClientRect();
       const width = Math.round(rect.width);
       const height = Math.round(rect.height);
-      if (width > 0 && height > 0) setSize((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
+      if (width <= 0 || height <= 0) return;
+
+      setSize((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
+      if (!fill) return;
+
+      const prevSize = fittedSizeRef.current;
+      const jumped =
+        prevSize.width === 0 ||
+        Math.abs(width - prevSize.width) >= 8 ||
+        Math.abs(height - prevSize.height) >= 8;
+      if (reason === 'resize' && !jumped) return;
+
+      const fit = fitView(fitPointsRef.current, width, height);
+      fittedSizeRef.current = { width, height };
+      setViewCenter(fit.center);
+      setZoom(fit.zoom);
     };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
+
+    resizeAndRecenter('mount');
+    const raf = requestAnimationFrame(() => resizeAndRecenter('mount'));
+    const onResize = () => resizeAndRecenter('resize');
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(onResize);
+    observer?.observe(el);
+    window.addEventListener('resize', onResize);
+    return () => {
+      cancelAnimationFrame(raf);
+      observer?.disconnect();
+      window.removeEventListener('resize', onResize);
+    };
+  }, [corridorKey, courseName, fill]);
 
   const cellLat = Math.round(viewCenter.lat * 100) / 100;
   const cellLon = Math.round(viewCenter.lon * 100) / 100;
@@ -620,49 +751,61 @@ export default function SatelliteHoleMap({
   const originScreen = view.project(measuredFrom.lat, measuredFrom.lon);
   const pinScreen = pin ? view.project(pin.lat, pin.lon) : null;
 
+  const modeToggle = (
+    <div
+      className="flex overflow-hidden rounded-2xl border daylight-border shrink-0"
+      style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'rgba(11,13,12,0.72)' }}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      <button
+        type="button"
+        onClick={() => setMode('satellite')}
+        aria-pressed={mode === 'satellite'}
+        className="px-2.5 py-1.5 text-[11px] font-semibold"
+        style={{
+          backgroundColor: mode === 'satellite' ? 'var(--accent-emerald)' : 'transparent',
+          color: mode === 'satellite' ? '#fff' : (fill ? '#F3F4F1' : 'var(--text-primary)'),
+        }}
+      >
+        Satellite
+      </button>
+      <button
+        type="button"
+        onClick={() => setMode('schematic')}
+        aria-pressed={mode === 'schematic'}
+        className="px-2.5 py-1.5 text-[11px] font-semibold"
+        style={{
+          backgroundColor: mode === 'schematic' ? 'var(--accent-emerald)' : 'transparent',
+          color: mode === 'schematic' ? '#fff' : (fill ? '#F3F4F1' : 'var(--text-primary)'),
+        }}
+      >
+        Schematic
+      </button>
+    </div>
+  );
+
   return (
     <section
-      className={fill ? 'flex h-full min-h-0 w-full flex-col overflow-hidden' : 'w-full max-w-md overflow-hidden rounded-2xl border'}
-      style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
+      className={fill ? 'relative h-full w-full overflow-hidden' : 'w-full max-w-md overflow-hidden rounded-2xl border'}
+      style={fill
+        ? { backgroundColor: '#0B0D0C' }
+        : { backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
       aria-label="Satellite hole map"
     >
-      <div className="flex shrink-0 items-start justify-between gap-2 px-3 pb-2 pt-3">
-        <div className="min-w-0">
-          <div className="text-sm font-semibold truncate">{courseName || 'Satellite hole map'}</div>
-          <div className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>{holeLabel}</div>
+      {!fill && (
+        <div className="flex shrink-0 items-start justify-between gap-2 px-3 pb-2 pt-3">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold truncate">{courseName || 'Satellite hole map'}</div>
+            <div className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>{holeLabel}</div>
+          </div>
+          {modeToggle}
         </div>
-        <div className="flex rounded-xl overflow-hidden border shrink-0" style={{ borderColor: 'var(--border-subtle)' }}>
-          <button
-            type="button"
-            onClick={() => setMode('satellite')}
-            aria-pressed={mode === 'satellite'}
-            className="px-2.5 py-1.5 text-[11px] font-semibold"
-            style={{
-              backgroundColor: mode === 'satellite' ? 'var(--accent-emerald)' : 'var(--bg-elevated)',
-              color: mode === 'satellite' ? '#fff' : 'var(--text-primary)',
-            }}
-          >
-            Satellite
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('schematic')}
-            aria-pressed={mode === 'schematic'}
-            className="px-2.5 py-1.5 text-[11px] font-semibold"
-            style={{
-              backgroundColor: mode === 'schematic' ? 'var(--accent-emerald)' : 'var(--bg-elevated)',
-              color: mode === 'schematic' ? '#fff' : 'var(--text-primary)',
-            }}
-          >
-            Schematic
-          </button>
-        </div>
-      </div>
+      )}
 
       <div
         ref={mapRef}
         className={fill
-          ? 'relative min-h-0 w-full flex-1 overflow-hidden touch-none select-none cursor-crosshair'
+          ? 'absolute inset-0 h-full w-full overflow-hidden touch-none select-none cursor-crosshair'
           : 'relative h-[320px] w-full overflow-hidden touch-none select-none cursor-crosshair'}
         style={{
           backgroundColor: schematic ? 'var(--bg-elevated)' : '#102018',
@@ -728,8 +871,14 @@ export default function SatelliteHoleMap({
           )}
         </svg>
 
+        {fill && (
+          <div className="absolute left-3 z-10 top-[calc(env(safe-area-inset-top)+4.75rem)]">
+            {modeToggle}
+          </div>
+        )}
+
         <div
-          className="absolute top-2 right-2 z-10 flex flex-col overflow-hidden rounded-xl border"
+          className={`absolute z-10 flex flex-col overflow-hidden rounded-xl border daylight-border ${fill ? 'right-3 top-[calc(env(safe-area-inset-top)+4.75rem)]' : 'top-2 right-2'}`}
           style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
           onPointerDown={(event) => event.stopPropagation()}
         >
@@ -755,7 +904,7 @@ export default function SatelliteHoleMap({
         </div>
 
         {mode === 'satellite' && (
-          <div className="absolute bottom-1 left-1.5 z-10 text-[9px] px-1 rounded pointer-events-none" style={{ background: 'rgba(0,0,0,0.45)', color: '#fff' }}>
+          <div className={`absolute z-10 text-[9px] px-1 rounded pointer-events-none ${fill ? 'left-3 bottom-[calc(env(safe-area-inset-bottom)+6.75rem)]' : 'bottom-1 left-1.5'}`} style={{ background: 'rgba(0,0,0,0.45)', color: '#fff' }}>
             © Esri
           </div>
         )}

@@ -697,6 +697,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
     const targetYards = Number.isFinite(Number(pinTarget?.yards)) ? Number(pinTarget.yards) : activeHole.yards;
     return (
       <ActiveRoundFocus
+        courseName={activeCourse.name}
         holeNumber={activeHole.number}
         par={activeHole.par}
         canPrev={holeIdx > 0}

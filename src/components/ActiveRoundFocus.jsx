@@ -1,6 +1,5 @@
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Minus, Moon, Sun, Volume2 } from 'lucide-react';
-import { useState } from 'react';
-import { useTheme } from '../context/ThemeContext';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronLeft, ChevronRight, Minus, Volume2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { useLanguage } from '../i18n/LanguageContext';
 import { formatDistance, formatSpeed, useUnits } from '../utils/distanceUnits';
 import { resolveTtsLocale, speakCaddieCallout } from '../utils/wearableAndAudioCaddie';
@@ -55,6 +54,7 @@ function WindArrow({ kind }) {
 }
 
 export default function ActiveRoundFocus({
+  courseName = '',
   holeNumber = 1,
   par = 4,
   canPrev = false,
@@ -75,11 +75,7 @@ export default function ActiveRoundFocus({
 }) {
   const { distanceUnit, toggleDistanceUnit, speedUnit } = useUnits();
   const { lang } = useLanguage();
-  const themeApi = useTheme() || {};
-  const [localNight, setLocalNight] = useState(() =>
-    typeof document !== 'undefined' ? document.documentElement.classList.contains('dark') : true
-  );
-  const night = themeApi.theme ? themeApi.theme === 'dark' : localNight;
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const rawPin = Number.isFinite(Number(pinYards)) ? Number(pinYards) : Number(centerYards) || 0;
   const rawCenter = Number.isFinite(Number(centerYards)) ? Number(centerYards) : rawPin;
   const { windMph, deltaYards, kind } = relativeWind(windSpeedMph, windDirDeg, holeBearingDeg);
@@ -90,16 +86,13 @@ export default function ActiveRoundFocus({
   const deltaLabel = `${deltaYards > 0 ? '+' : ''}${deltaYards}`;
   const ttsLocale = resolveTtsLocale(lang);
 
-  const toggleContrast = () => {
-    if (typeof themeApi.toggleTheme === 'function') {
-      themeApi.toggleTheme();
-      return;
-    }
-    const root = document.documentElement;
-    const nextNight = !root.classList.contains('dark');
-    root.classList.toggle('dark', nextNight);
-    setLocalNight(nextNight);
-  };
+  useEffect(() => {
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, []);
 
   const speak = () => {
     speakCaddieCallout(
@@ -117,90 +110,94 @@ export default function ActiveRoundFocus({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-40 flex flex-col"
-      style={{ backgroundColor: night ? '#0B0D0C' : '#F6F5F0', color: 'var(--text-primary)' }}
-    >
-      <div className="mx-auto flex h-full min-h-0 w-full max-w-md flex-col">
-        <header
-          className="flex shrink-0 items-center gap-1.5 border-b px-2 py-1.5"
-          style={{ borderColor: 'var(--border-subtle)', backgroundColor: night ? '#0B0D0C' : '#FFFFFF' }}
-        >
-          <button
-            type="button"
-            onClick={onPrev}
-            disabled={!canPrev}
-            aria-label="Previous hole"
-            className="min-h-[44px] min-w-[44px] rounded-2xl border text-lg font-semibold disabled:opacity-40"
-            style={{ borderColor: 'var(--border-subtle)' }}
-          >
-            −
-          </button>
-          <div className="min-w-[3.25rem] text-center leading-tight">
-            <div className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>Hole</div>
-            <div className="tabular-nums text-base font-bold">{holeNumber}</div>
-          </div>
-          <button
-            type="button"
-            onClick={onNext}
-            disabled={!canNext}
-            aria-label="Next hole"
-            className="min-h-[44px] min-w-[44px] rounded-2xl border text-lg font-semibold disabled:opacity-40"
-            style={{ borderColor: 'var(--border-subtle)' }}
-          >
-            +
-          </button>
-          <div className="px-1 text-center leading-tight">
-            <div className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>Par</div>
-            <div className="tabular-nums text-base font-bold">{par}</div>
-          </div>
-          <button
-            type="button"
-            onClick={toggleDistanceUnit}
-            aria-label={distanceUnit === 'm' ? 'Distance unit meters. Switch to yards' : 'Distance unit yards. Switch to meters'}
-            className="min-h-[44px] rounded-2xl border px-2.5 text-xs font-semibold"
-            style={{ borderColor: 'var(--border-subtle)' }}
-          >
-            {distanceUnit === 'm' ? 'M' : 'Yds'}
-          </button>
-          <button
-            type="button"
-            onClick={toggleContrast}
-            aria-label={night ? 'Night contrast. Switch to daylight' : 'Daylight contrast. Switch to night'}
-            className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-2xl border"
-            style={{ borderColor: 'var(--border-subtle)' }}
-          >
-            {night ? <Sun size={16} /> : <Moon size={16} />}
-          </button>
-          <button
-            type="button"
-            onClick={onEndRound}
-            className="ml-auto min-h-[44px] rounded-2xl border px-2.5 text-xs font-semibold text-white"
-            style={{ backgroundColor: '#10B981', borderColor: '#10B981' }}
-          >
-            End Round
-          </button>
-        </header>
+    <div className="fixed inset-0 z-40 h-[100dvh] w-screen overflow-hidden" style={{ backgroundColor: '#0B0D0C' }}>
+      <div className="absolute inset-0 h-full w-full">{children}</div>
 
-        <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+      <header className="pointer-events-none absolute inset-x-0 top-0 z-20 pt-[env(safe-area-inset-top)]">
+        <div className="pointer-events-auto mx-2 mt-1 rounded-3xl border-2 border-white/15 daylight-border bg-[#0B0D0C]/85 px-2 py-1 text-white shadow-lg backdrop-blur-md">
+          <div className="truncate px-1 text-[11px] font-semibold leading-tight">{courseName || 'Active round'}</div>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={onPrev}
+              disabled={!canPrev}
+              aria-label="Previous hole"
+              className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-2xl disabled:opacity-40"
+            >
+              <ChevronLeft size={18} />
+            </button>
+            <div className="min-w-[4.5rem] text-center text-xs font-bold leading-tight">
+              Hole <span className="tabular-nums">{holeNumber}</span>
+            </div>
+            <button
+              type="button"
+              onClick={onNext}
+              disabled={!canNext}
+              aria-label="Next hole"
+              className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-2xl disabled:opacity-40"
+            >
+              <ChevronRight size={18} />
+            </button>
+            <div className="px-1 text-center text-[11px] leading-tight">
+              <div className="font-semibold uppercase tracking-wider text-white/70">Par</div>
+              <div className="tabular-nums text-sm font-bold">{par}</div>
+            </div>
+            <button
+              type="button"
+              onClick={toggleDistanceUnit}
+              aria-label={distanceUnit === 'm' ? 'Distance unit meters. Switch to yards' : 'Distance unit yards. Switch to meters'}
+              className="min-h-[44px] rounded-2xl border border-white/20 px-2 text-[11px] font-semibold"
+            >
+              {distanceUnit === 'm' ? 'M' : 'YDS'}
+            </button>
+            <button
+              type="button"
+              onClick={onEndRound}
+              className="ml-auto min-h-[44px] whitespace-nowrap rounded-2xl px-2.5 text-[11px] font-semibold text-[#0B0D0C]"
+              style={{ backgroundColor: '#10B981' }}
+            >
+              End Round
+            </button>
+          </div>
+        </div>
+      </header>
 
-        <div className="shrink-0 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2">
-          <div className="space-y-2 rounded-3xl border bg-[#0B0D0C] p-3 text-white">
-            <div className="flex items-end justify-between gap-3">
-              <div>
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-[#10B981]">Center of Green</div>
-                <div className="tabular-nums text-3xl font-bold leading-none">{formatDistance(rawCenter, distanceUnit)}</div>
-              </div>
-              <div className="text-right">
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-[#10B981]">Club Suggestion</div>
-                <div className="text-base font-bold leading-tight">{clubName}</div>
-                <div className="text-xs text-[#10B981]">
-                  Stock <span className="tabular-nums">{formatDistance(clubCarry, distanceUnit)}</span>
-                </div>
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+        <div className="pointer-events-auto rounded-3xl border-2 border-white/15 daylight-border bg-[#0B0D0C]/85 px-3 py-2 text-white shadow-lg backdrop-blur-md">
+          <div className="flex items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-[#10B981]">Center of Green</div>
+              <div className="tabular-nums text-2xl font-bold leading-none text-[#10B981]">{formatDistance(rawCenter, distanceUnit)}</div>
+            </div>
+            <div className="min-w-0 text-right">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-[#10B981]">Club Suggestion</div>
+              <div className="truncate text-sm font-bold leading-tight">{clubName}</div>
+              <div className="text-[10px] text-[#10B981]">
+                Stock <span className="tabular-nums">{formatDistance(clubCarry, distanceUnit)}</span>
               </div>
             </div>
+            <button
+              type="button"
+              onClick={speak}
+              aria-label="Play caddie callout"
+              className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-2xl text-[#0B0D0C]"
+              style={{ backgroundColor: '#10B981' }}
+            >
+              <Volume2 size={16} />
+            </button>
+          </div>
 
-            <div className="grid grid-cols-2 gap-1.5">
+          <button
+            type="button"
+            onClick={() => setDetailsOpen((open) => !open)}
+            aria-expanded={detailsOpen}
+            className="mt-1 min-h-[32px] w-full text-left text-[10px] font-semibold uppercase tracking-wider text-[#10B981]"
+          >
+            Pin • Windage • Shot Suggestion {detailsOpen ? '▴' : '▾'}
+          </button>
+
+          {detailsOpen && (
+            <div className="mt-1 grid grid-cols-2 gap-1.5">
               <div className="flex min-h-[44px] flex-col justify-center rounded-2xl border border-[#10B981]/50 px-2">
                 <div className="text-[10px] font-semibold uppercase tracking-wider text-[#10B981]">Pin</div>
                 <div className="tabular-nums text-sm font-semibold">{formatDistance(rawPin, distanceUnit)}</div>
@@ -213,24 +210,14 @@ export default function ActiveRoundFocus({
                   <span className="tabular-nums">Plays {deltaLabel}</span>
                 </div>
               </div>
-            </div>
-
-            <div className="flex min-h-[44px] items-center gap-2 rounded-2xl border border-[#10B981]/50 px-2 py-1">
-              <div className="min-w-0 flex-1">
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-[#10B981]">Shot Suggestion</div>
-                <div className="truncate text-xs">{suggestion || 'Aim at the middle of the green.'}</div>
+              <div className="col-span-2 flex min-h-[44px] items-center rounded-2xl border border-[#10B981]/50 px-2 py-1">
+                <div className="min-w-0">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-[#10B981]">Shot Suggestion</div>
+                  <div className="text-xs">{suggestion || 'Aim at the middle of the green.'}</div>
+                </div>
               </div>
-              <button
-                type="button"
-                onClick={speak}
-                aria-label="Play caddie callout"
-                className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-2xl text-[#0B0D0C]"
-                style={{ backgroundColor: '#10B981' }}
-              >
-                <Volume2 size={16} />
-              </button>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>
