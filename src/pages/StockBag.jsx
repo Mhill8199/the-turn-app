@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Briefcase, CheckCircle2, Compass, Layers, Plus, Sparkles, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Briefcase, CheckCircle2, Compass, Layers, Sparkles, Trash2, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { YARDS_TO_METERS, useUnits } from '../utils/distanceUnits';
@@ -507,7 +507,7 @@ export default function StockBag({ clubs, setClubs }) {
           className="inline-flex w-full min-h-[44px] items-center justify-center gap-1.5 rounded-3xl text-sm font-semibold text-[#0B0D0C]"
           style={{ backgroundColor: '#10B981' }}
         >
-          <Plus size={16} /> + Add Club
+          + Add Club
         </button>
       </div>
 
