@@ -86,6 +86,7 @@ export default function OnCourseHoleHUD({
         {hasCoords ? (
           <SatelliteHoleMap
             fill
+            clubs={playableClubs}
             courseName={courseName}
             lat={Number(lat)}
             lon={Number(lon)}

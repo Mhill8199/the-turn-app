@@ -977,9 +977,12 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         livePosition={liveRoundGps}
         clubs={suggestionClubs}
         suggestion={activeHole.note || aimAdvice}
+        holeScore={currentStat}
+        onHoleScore={updateHoleStat}
       >
         <SatelliteHoleMap
           fill
+          clubs={suggestionClubs}
           courseName={activeCourse.name}
           center={{ lat: activeCourse.lat, lon: activeCourse.lon }}
           hole={{

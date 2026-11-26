@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { COURSE_PRESETS } from '../lib/weatherPhysics';
 import { supabase } from '../lib/supabase';
+import { closestActiveClub } from '../utils/bagClubs';
 import { formatDistance as formatYardsDistance, useUnits } from '../utils/distanceUnits';
 
 /** ESRI World Imagery. Request this z/y/x order; never request z above 19. */
@@ -358,6 +359,174 @@ function bearingBetween(a, b) {
   return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
 }
 
+/** Clockwise screen rotation that brings `bearingDeg` (clockwise from north) to the top of the map. */
+function rotateScreen(x, y, width, height, bearingDeg) {
+  const dx = x - width / 2;
+  const dy = y - height / 2;
+  const a = ((Number(bearingDeg) || 0) * Math.PI) / 180;
+  const c = Math.cos(a);
+  const s = Math.sin(a);
+  return { x: width / 2 + dx * c + dy * s, y: height / 2 - dx * s + dy * c };
+}
+
+function inverseRotate(dx, dy, bearingDeg) {
+  const a = ((Number(bearingDeg) || 0) * Math.PI) / 180;
+  const c = Math.cos(a);
+  const s = Math.sin(a);
+  return { dx: dx * c - dy * s, dy: dx * s + dy * c };
+}
+
+function rotatedOffset(center, point, zoom, bearingDeg) {
+  const viewZoom = clampZoom(zoom);
+  const nativeZ = Math.min(viewZoom, MAX_NATIVE_ZOOM);
+  const scale = 2 ** (viewZoom - nativeZ);
+  const dx = (lonToTileX(point.lon, nativeZ) - lonToTileX(center.lon, nativeZ)) * TILE_SIZE * scale;
+  const dy = (latToTileY(point.lat, nativeZ) - latToTileY(center.lat, nativeZ)) * TILE_SIZE * scale;
+  const a = ((Number(bearingDeg) || 0) * Math.PI) / 180;
+  const c = Math.cos(a);
+  const s = Math.sin(a);
+  return { x: dx * c + dy * s, y: -dx * s + dy * c };
+}
+
+/** Tee/GPS sits near the bottom, green near the top, hole bearing aimed up the screen. */
+function frameHoleView(lie, green, width, height) {
+  const start = validPoint(lie);
+  const end = validPoint(green);
+  const safeW = Math.max(1, width);
+  const safeH = Math.max(1, height);
+  if (!start && !end) return { center: DOCUMENTED_DEFAULT, zoom: 18, bearing: 0 };
+  if (!start || !end || haversineMeters(start, end) < 20) {
+    return { center: start || end, zoom: 18, bearing: 0 };
+  }
+  const bearing = bearingBetween(start, end);
+  const yards = metersToYards(haversineMeters(start, end));
+  const center = projectPoint(start, bearing, yards * 0.56) || {
+    lat: (start.lat + end.lat) / 2,
+    lon: (start.lon + end.lon) / 2,
+  };
+  const padTop = Math.max(78, safeH * 0.14);
+  const padBottom = Math.max(120, safeH * 0.24);
+  let chosen = MIN_ZOOM;
+  for (let z = MAX_NATIVE_ZOOM; z >= MIN_ZOOM; z -= 1) {
+    const lieDelta = rotatedOffset(center, start, z, bearing);
+    const greenDelta = rotatedOffset(center, end, z, bearing);
+    const lieY = safeH / 2 + lieDelta.y;
+    const greenY = safeH / 2 + greenDelta.y;
+    const minX = safeW / 2 + Math.min(lieDelta.x, greenDelta.x);
+    const maxX = safeW / 2 + Math.max(lieDelta.x, greenDelta.x);
+    const top = Math.min(lieY, greenY);
+    const bottom = Math.max(lieY, greenY);
+    if (top >= padTop && bottom <= safeH - padBottom && minX >= 28 && maxX <= safeW - 28) {
+      chosen = z;
+      break;
+    }
+  }
+  return { center, zoom: clampZoom(chosen), bearing };
+}
+
+function pointInRing(point, ring) {
+  if (!point || !Array.isArray(ring) || ring.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+    const yi = ring[i].lat;
+    const xi = ring[i].lon;
+    const yj = ring[j].lat;
+    const xj = ring[j].lon;
+    const crosses = (yi > point.lat) !== (yj > point.lat);
+    if (!crosses) continue;
+    const xCross = ((xj - xi) * (point.lat - yi)) / ((yj - yi) || 1e-12) + xi;
+    if (point.lon < xCross) inside = !inside;
+  }
+  return inside;
+}
+
+function ringCentroid(ring) {
+  let lat = 0;
+  let lon = 0;
+  const count = ring.length || 1;
+  for (const point of ring) {
+    lat += point.lat;
+    lon += point.lon;
+  }
+  return { lat: lat / count, lon: lon / count };
+}
+
+function hitHazard(features, point) {
+  let best = null;
+  let bestD = Infinity;
+  for (const feature of features || []) {
+    if (feature?.kind !== 'bunker' && feature?.kind !== 'water') continue;
+    for (const ring of feature.rings || []) {
+      if (!pointInRing(point, ring)) continue;
+      const centroid = ringCentroid(ring);
+      const distance = haversineMeters(point, centroid);
+      if (distance < bestD) {
+        bestD = distance;
+        best = { feature, ring, centroid };
+      }
+    }
+  }
+  return best;
+}
+
+function carryClearYards(lie, ring) {
+  let carry = Infinity;
+  let clear = 0;
+  const samples = [...ring];
+  for (let i = 0; i < ring.length; i += 1) {
+    const a = ring[i];
+    const b = ring[(i + 1) % ring.length];
+    samples.push({ lat: (a.lat + b.lat) / 2, lon: (a.lon + b.lon) / 2 });
+  }
+  for (const sample of samples) {
+    const yards = metersToYards(haversineMeters(lie, sample));
+    if (!Number.isFinite(yards)) continue;
+    if (yards < carry) carry = yards;
+    if (yards > clear) clear = yards;
+  }
+  if (!Number.isFinite(carry)) return { carryYards: 0, clearYards: 0 };
+  return { carryYards: Math.round(carry), clearYards: Math.round(clear) };
+}
+
+function constrainToCorridor(lie, green, point) {
+  const start = validPoint(lie);
+  const end = validPoint(green);
+  const tap = validPoint(point);
+  if (!start || !end || !tap) return tap;
+  const holeYards = metersToYards(haversineMeters(start, end));
+  if (holeYards < 12) return end;
+  const bearing = bearingBetween(start, end);
+  const dist = metersToYards(haversineMeters(start, tap));
+  let delta = bearingBetween(start, tap) - bearing;
+  if (delta > 180) delta -= 360;
+  if (delta < -180) delta += 360;
+  const along = dist * Math.cos((delta * Math.PI) / 180);
+  const lateral = dist * Math.sin((delta * Math.PI) / 180);
+  const clampedAlong = Math.min(Math.max(8, along), Math.max(8, holeYards - 4));
+  const clampedLateral = Math.max(-32, Math.min(32, lateral));
+  const onLine = projectPoint(start, bearing, clampedAlong);
+  if (!onLine || Math.abs(clampedLateral) < 0.5) return onLine;
+  return projectPoint(onLine, bearing + (clampedLateral >= 0 ? 90 : -90), Math.abs(clampedLateral)) || onLine;
+}
+
+function dispersionPath(project, origin, bearingDeg, alongYards, lateralYards) {
+  let path = '';
+  const steps = 28;
+  for (let i = 0; i <= steps; i += 1) {
+    const t = (i / steps) * Math.PI * 2;
+    const along = Math.cos(t) * alongYards;
+    const lateral = Math.sin(t) * lateralYards;
+    const base = projectPoint(origin, along >= 0 ? bearingDeg : bearingDeg + 180, Math.abs(along));
+    if (!base) continue;
+    const side = lateral >= 0 ? bearingDeg + 90 : bearingDeg - 90;
+    const point = projectPoint(base, side, Math.abs(lateral));
+    if (!point) continue;
+    const screen = project(point.lat, point.lon);
+    path += `${i === 0 ? 'M' : 'L'}${screen.x.toFixed(1)} ${screen.y.toFixed(1)} `;
+  }
+  return path ? `${path}Z` : '';
+}
+
 /** Custom slippy fitBounds: center and zoom so every point sits inside the viewport. */
 function fitBounds(points, width, height) {
   return fitView(points, width, height);
@@ -458,10 +627,10 @@ function featureStyle(kind, schematic) {
     return { fill: schematic ? 'rgba(22, 101, 52, 0.38)' : 'rgba(34, 197, 94, 0.42)', stroke: '#4ADE80', width: 1.6, close: true };
   }
   if (kind === 'bunker') {
-    return { fill: 'rgba(232, 210, 154, 0.88)', stroke: '#A16207', width: 1.2, close: true };
+    return { fill: 'rgba(232, 210, 154, 0.92)', stroke: '#F5E6C8', width: 1.8, close: true };
   }
   if (kind === 'water') {
-    return { fill: 'rgba(14, 165, 233, 0.55)', stroke: '#0284C7', width: 1.5, close: true };
+    return { fill: 'rgba(14, 165, 233, 0.66)', stroke: '#7DD3FC', width: 1.8, close: true };
   }
   return { fill: 'none', stroke: schematic ? '#9A3412' : '#FBBF24', width: 2.25, close: false };
 }
@@ -528,7 +697,9 @@ export default function SatelliteHoleMap({
   carryYards = null,
   markRequest = null,
   aimTarget = 'center',
+  clubs = [],
 }) {
+  const { formatDistance } = useUnits();
   const holeMeta = hole || (holeNumber != null ? { number: holeNumber } : null);
   const propLat = validPoint(holeMeta)?.lat ?? validPoint(center)?.lat ?? (Number.isFinite(Number(lat)) ? Number(lat) : null);
   const propLon = validPoint(holeMeta)?.lon ?? validPoint(center)?.lon ?? (Number.isFinite(Number(lon)) ? Number(lon) : null);
@@ -545,9 +716,13 @@ export default function SatelliteHoleMap({
   const [size, setSize] = useState({ width: 360, height: 320 });
   const [shots, setShots] = useState([]);
   const [liveGps, setLiveGps] = useState(null);
+  const [heading, setHeading] = useState(0);
+  const [reticle, setReticle] = useState(null);
+  const [hazardPick, setHazardPick] = useState(null);
 
   const mapRef = useRef(null);
   const dragRef = useRef(null);
+  const reticleDragRef = useRef(null);
   const onPinChangeRef = useRef(onPinChange);
   const onShotsChangeRef = useRef(onShotsChange);
   const onLivePositionRef = useRef(onLivePosition);
@@ -567,12 +742,20 @@ export default function SatelliteHoleMap({
   const clubRef = useRef(clubUsed);
   const recordShotRef = useRef(() => {});
   const markIdRef = useRef(null);
+  const headingRef = useRef(0);
+  const reticleRef = useRef(null);
+  const lieRef = useRef(null);
+  const legClubRef = useRef('');
+  const carryHintRef = useRef(carryYards);
+  const gpsFrameRef = useRef('');
   viewCenterRef.current = viewCenter;
   zoomRef.current = zoom;
   sizeRef.current = size;
   shotsRef.current = shots;
   liveRef.current = liveGps;
   clubRef.current = clubUsed;
+  headingRef.current = heading;
+  carryHintRef.current = carryYards;
 
   const holeLat = validPoint(hole)?.lat ?? null;
   const holeLon = validPoint(hole)?.lon ?? null;
@@ -609,7 +792,7 @@ export default function SatelliteHoleMap({
     ...(lastShot && Number.isFinite(Number(lastShot.lat)) ? [{ lat: Number(lastShot.lat), lon: Number(lastShot.lng) }] : []),
   ];
   fitPointsRef.current = framePoints;
-  const corridorKey = `${holeNumber ?? hole?.number ?? ''}|${framePoints.map((point) => `${point.lat.toFixed(5)},${point.lon.toFixed(5)}`).join('|')}`;
+  const corridorKey = `${holeNumber ?? hole?.number ?? ''}|${origin?.lat ?? ''}|${origin?.lon ?? ''}|${shots.length}|${framePoints.map((point) => `${point.lat.toFixed(5)},${point.lon.toFixed(5)}`).join('|')}`;
 
   useEffect(() => {
     if (!fill) {
@@ -676,8 +859,14 @@ export default function SatelliteHoleMap({
       });
     }
     const layout = sizeRef.current;
-    const fit = fitBounds([lie, green, ...(startRef.current ? [startRef.current] : [])], layout.width, layout.height);
+    const fit = fill
+      ? frameHoleView(lie, green, layout.width, layout.height)
+      : fitBounds([lie, green, ...(startRef.current ? [startRef.current] : [])], layout.width, layout.height);
     fittedSizeRef.current = { width: layout.width, height: layout.height };
+    if (fill && Number.isFinite(fit.bearing)) {
+      headingRef.current = fit.bearing;
+      setHeading(fit.bearing);
+    }
     setViewCenter(fit.center);
     setZoom(fit.zoom);
   };
@@ -685,13 +874,47 @@ export default function SatelliteHoleMap({
   useEffect(() => {
     if (!fill || !markRequest?.id || markRequest.id === markIdRef.current) return;
     markIdRef.current = markRequest.id;
-    const last = shotsRef.current[shotsRef.current.length - 1];
-    const point = liveRef.current
-      || (last ? { lat: last.lat, lon: last.lng } : null)
-      || validPoint(origin)
-      || viewCenterRef.current;
-    recordShotRef.current(point, markRequest.club);
+    const lie = lieRef.current;
+    const gps = liveRef.current;
+    const aim = reticleRef.current;
+    let landing = aim || gps || lie || validPoint(origin) || viewCenterRef.current;
+    if (gps && lie && metersToYards(haversineMeters(lie, gps)) >= 12) landing = gps;
+    recordShotRef.current(landing, legClubRef.current || markRequest.club);
   }, [fill, markRequest, origin]);
+
+  const lieKey = shots.length ? `s${shots.length}` : (liveGps ? 'gps' : 'tee');
+  useEffect(() => {
+    if (!fill) return;
+    const lie = lieRef.current;
+    const green = greenRef.current;
+    if (!lie || !green) return;
+    const remaining = metersToYards(haversineMeters(lie, green));
+    const preferred = Number(carryHintRef.current);
+    const along = Math.max(8, Math.min(
+      Math.max(8, remaining - 6),
+      Number.isFinite(preferred) && preferred > 0 ? preferred : remaining * 0.62
+    ));
+    const next = projectPoint(lie, bearingBetween(lie, green), Math.min(along, Math.max(8, remaining)));
+    if (!next) return;
+    reticleRef.current = next;
+    setReticle(next);
+    setHazardPick(null);
+  }, [fill, hole?.number, holeNumber, courseName, lieKey]);
+
+  useEffect(() => {
+    if (!fill || shots.length || !liveGps) return;
+    const token = `${holeNumber ?? ''}:${hole?.number ?? ''}:${courseName}`;
+    if (gpsFrameRef.current === token) return;
+    gpsFrameRef.current = token;
+    const fit = frameHoleView(liveGps, greenRef.current, sizeRef.current.width, sizeRef.current.height);
+    fittedSizeRef.current = { ...sizeRef.current };
+    if (Number.isFinite(fit.bearing)) {
+      headingRef.current = fit.bearing;
+      setHeading(fit.bearing);
+    }
+    setViewCenter(fit.center);
+    setZoom(fit.zoom);
+  }, [fill, liveGps, shots.length, holeNumber, hole?.number, courseName]);
 
   useEffect(() => {
     const on = () => setOnline(true);
@@ -729,8 +952,12 @@ export default function SatelliteHoleMap({
         Math.abs(height - prevSize.height) >= 8;
       if (reason === 'resize' && !jumped) return;
 
-      const fit = fitBounds(fitPointsRef.current, width, height);
+      const fit = frameHoleView(lieRef.current || greenRef.current, greenRef.current, width, height);
       fittedSizeRef.current = { width, height };
+      if (Number.isFinite(fit.bearing)) {
+        headingRef.current = fit.bearing;
+        setHeading(fit.bearing);
+      }
       setViewCenter(fit.center);
       setZoom(fit.zoom);
     };
@@ -861,7 +1088,21 @@ export default function SatelliteHoleMap({
     drag.lastY = event.clientY;
     if (!drag.moved) return;
     const currentSize = sizeRef.current;
-    setViewCenter((current) => makeView(current, zoomRef.current, currentSize.width, currentSize.height).pan(dx, dy));
+    const local = inverseRotate(dx, dy, headingRef.current);
+    setViewCenter((current) => makeView(current, zoomRef.current, currentSize.width, currentSize.height).pan(local.dx, local.dy));
+  };
+
+  const eventToLatLon = (event) => {
+    const rect = mapRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+    const layout = sizeRef.current;
+    const x = ((event.clientX - rect.left) / rect.width) * layout.width;
+    const y = ((event.clientY - rect.top) / rect.height) * layout.height;
+    const local = inverseRotate(x - layout.width / 2, y - layout.height / 2, headingRef.current);
+    return makeView(viewCenterRef.current, zoomRef.current, layout.width, layout.height).unproject(
+      local.dx + layout.width / 2,
+      local.dy + layout.height / 2
+    );
   };
 
   const onPointerUp = (event) => {
@@ -869,22 +1110,75 @@ export default function SatelliteHoleMap({
     if (!drag || drag.id !== event.pointerId) return;
     dragRef.current = null;
     if (drag.moved) return;
-    const rect = mapRef.current?.getBoundingClientRect();
-    if (!rect || rect.width <= 0 || rect.height <= 0) return;
-    const layout = sizeRef.current;
-    const x = ((event.clientX - rect.left) / rect.width) * layout.width;
-    const y = ((event.clientY - rect.top) / rect.height) * layout.height;
-    const nextPin = makeView(viewCenterRef.current, zoomRef.current, layout.width, layout.height).unproject(x, y);
-    setPin(nextPin);
-    const from = validPoint(gpsOrigin) || validPoint(origin) || viewCenterRef.current;
-    const meters = haversineMeters(from, nextPin);
-    onPinChangeRef.current?.({
-      lat: nextPin.lat,
-      lon: nextPin.lon,
-      yards: metersToYards(meters),
-      meters,
-    });
-    if (fill) recordShotRef.current(nextPin, undefined, false);
+    const nextPin = eventToLatLon(event);
+    if (!nextPin) return;
+    if (!fill) {
+      setPin(nextPin);
+      const from = validPoint(gpsOrigin) || validPoint(origin) || viewCenterRef.current;
+      const meters = haversineMeters(from, nextPin);
+      onPinChangeRef.current?.({
+        lat: nextPin.lat,
+        lon: nextPin.lon,
+        yards: metersToYards(meters),
+        meters,
+      });
+      return;
+    }
+    const lie = lieRef.current || validPoint(origin) || nextPin;
+    const hit = hitHazard(features, nextPin);
+    if (hit) {
+      const range = carryClearYards(lie, hit.ring);
+      setHazardPick({
+        id: hit.feature.id,
+        kind: hit.feature.kind,
+        lat: hit.centroid.lat,
+        lon: hit.centroid.lon,
+        ...range,
+      });
+      return;
+    }
+    setHazardPick(null);
+    const green = greenRef.current;
+    const next = green ? constrainToCorridor(lie, green, nextPin) : nextPin;
+    if (!next) return;
+    reticleRef.current = next;
+    setReticle(next);
+  };
+
+  const moveReticle = (event) => {
+    const nextPin = eventToLatLon(event);
+    if (!nextPin) return;
+    const lie = lieRef.current;
+    const green = greenRef.current;
+    const next = lie && green ? constrainToCorridor(lie, green, nextPin) : nextPin;
+    if (!next) return;
+    reticleRef.current = next;
+    setReticle(next);
+  };
+
+  const onReticlePointerDown = (event) => {
+    event.stopPropagation();
+    if (event.button != null && event.button !== 0) return;
+    reticleDragRef.current = { id: event.pointerId, moved: false, x: event.clientX, y: event.clientY };
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture can fail if the pointer already ended.
+    }
+  };
+
+  const onReticlePointerMove = (event) => {
+    const drag = reticleDragRef.current;
+    if (!drag || drag.id !== event.pointerId) return;
+    if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > 4) drag.moved = true;
+    if (!drag.moved) return;
+    moveReticle(event);
+  };
+
+  const onReticlePointerUp = (event) => {
+    event.stopPropagation();
+    if (reticleDragRef.current?.id !== event.pointerId) return;
+    reticleDragRef.current = null;
   };
 
   const useMyGps = () => {
@@ -917,36 +1211,58 @@ export default function SatelliteHoleMap({
   const ballPoint = lastShot && Number.isFinite(Number(lastShot.lat))
     ? { lat: Number(lastShot.lat), lon: Number(lastShot.lng) }
     : liveGps;
+  const lieForAim = ballPoint || teeRef.current;
+  lieRef.current = lieForAim;
   const aimBearingBase = Number.isFinite(holeBearing)
     ? holeBearing
-    : (ballPoint && greenCenter ? bearingBetween(ballPoint, greenCenter) : 0);
+    : (lieForAim && greenCenter ? bearingBetween(lieForAim, greenCenter) : 0);
   const targetPoint = aimTarget === 'front'
     ? projectPoint(greenCenter, aimBearingBase + 180, 12)
     : aimTarget === 'back'
       ? projectPoint(greenCenter, aimBearingBase, 14)
       : greenCenter;
-  const ballScreen = ballPoint ? view.project(ballPoint.lat, ballPoint.lon) : null;
+  const lieUnrot = lieForAim ? view.project(lieForAim.lat, lieForAim.lon) : null;
+  const reticleUnrot = reticle ? view.project(reticle.lat, reticle.lon) : null;
+  const greenUnrot = greenCenter ? view.project(greenCenter.lat, greenCenter.lon) : null;
   const targetScreen = targetPoint ? view.project(targetPoint.lat, targetPoint.lon) : null;
   const liveScreen = liveGps ? view.project(liveGps.lat, liveGps.lon) : null;
   const shotScreens = shots.map((shot) => ({
     ...shot,
     ...view.project(Number(shot.lat), Number(shot.lng)),
   }));
-  const carry = Number(carryYards);
-  const aimBearing = ballPoint && targetPoint ? bearingBetween(ballPoint, targetPoint) : null;
-  const shotPath = shotScreens.length
-    ? shotScreens.map((shot, index) => `${index === 0 ? 'M' : 'L'}${shot.x.toFixed(1)} ${shot.y.toFixed(1)}`).join(' ')
+  const teeScreen = teeRef.current ? view.project(teeRef.current.lat, teeRef.current.lon) : null;
+  const trailScreens = [
+    ...(teeScreen && shotScreens.length ? [teeScreen] : []),
+    ...shotScreens,
+  ];
+  const shotPath = trailScreens.length > 1
+    ? trailScreens.map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' ')
     : '';
+  const leg1Yards = fill && lieForAim && reticle ? metersToYards(haversineMeters(lieForAim, reticle)) : null;
+  const leg2Yards = fill && reticle && greenCenter ? metersToYards(haversineMeters(reticle, greenCenter)) : null;
+  const legClub = Number.isFinite(leg1Yards) ? closestActiveClub(clubs, leg1Yards) : null;
+  const legClubName = legClub?.club_type || legClub?.name || '';
+  legClubRef.current = legClubName || clubUsed || '';
+  const aimLineBearing = lieForAim && reticle ? bearingBetween(lieForAim, reticle) : heading;
+  const spreadAlong = Math.max(3.5, (Number(leg1Yards) || 0) * 0.03);
+  const spreadLateral = Math.max(2.5, (Number(leg1Yards) || 0) * ((Number(leg1Yards) || 0) > 220 ? 0.065 : 0.04));
+  const upright = (point) => (point ? rotateScreen(point.x, point.y, size.width, size.height, fill ? heading : 0) : null);
+  const lieUp = upright(lieUnrot);
+  const reticleUp = upright(reticleUnrot);
+  const greenUp = upright(greenUnrot);
+  const hazardUp = hazardPick ? upright(view.project(hazardPick.lat, hazardPick.lon)) : null;
 
   const frameGps = () => {
-    const points = [];
-    if (liveRef.current) points.push(liveRef.current);
-    if (greenRef.current) points.push(greenRef.current);
     const last = shotsRef.current[shotsRef.current.length - 1];
-    if (last) points.push({ lat: Number(last.lat), lon: Number(last.lng) });
-    if (!points.length) return;
-    const fit = fitBounds(points, sizeRef.current.width, sizeRef.current.height);
+    const lie = liveRef.current
+      || (last ? { lat: Number(last.lat), lon: Number(last.lng) } : null)
+      || lieRef.current;
+    const fit = frameHoleView(lie, greenRef.current, sizeRef.current.width, sizeRef.current.height);
     fittedSizeRef.current = { width: sizeRef.current.width, height: sizeRef.current.height };
+    if (Number.isFinite(fit.bearing)) {
+      headingRef.current = fit.bearing;
+      setHeading(fit.bearing);
+    }
     setViewCenter(fit.center);
     setZoom(fit.zoom);
   };
@@ -961,7 +1277,7 @@ export default function SatelliteHoleMap({
         type="button"
         onClick={() => setMode('satellite')}
         aria-pressed={mode === 'satellite'}
-        className="px-2.5 py-1.5 text-[11px] font-semibold"
+        className="min-h-[44px] px-2.5 text-[11px] font-semibold"
         style={{
           backgroundColor: mode === 'satellite' ? 'var(--accent-emerald)' : 'transparent',
           color: mode === 'satellite' ? '#fff' : (fill ? '#F3F4F1' : 'var(--text-primary)'),
@@ -973,7 +1289,7 @@ export default function SatelliteHoleMap({
         type="button"
         onClick={() => setMode('schematic')}
         aria-pressed={mode === 'schematic'}
-        className="px-2.5 py-1.5 text-[11px] font-semibold"
+        className="min-h-[44px] px-2.5 text-[11px] font-semibold"
         style={{
           backgroundColor: mode === 'schematic' ? 'var(--accent-emerald)' : 'transparent',
           color: mode === 'schematic' ? '#fff' : (fill ? '#F3F4F1' : 'var(--text-primary)'),
@@ -986,7 +1302,7 @@ export default function SatelliteHoleMap({
 
   return (
     <section
-      className={fill ? 'relative h-full w-full overflow-hidden' : 'w-full max-w-md overflow-hidden rounded-2xl border'}
+      className={fill ? 'fixed inset-0 z-40 h-[100dvh] w-screen overflow-hidden' : 'w-full max-w-md overflow-hidden rounded-2xl border daylight-border'}
       style={fill
         ? { backgroundColor: '#0B0D0C' }
         : { backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
@@ -1018,6 +1334,10 @@ export default function SatelliteHoleMap({
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
       >
+        <div
+          className="pointer-events-none absolute inset-0 origin-center"
+          style={{ transform: `rotate(${fill ? heading : 0}deg)` }}
+        >
         {mode === 'satellite' && view.tiles.map((tile) => (
           <img
             key={tile.key}
@@ -1069,31 +1389,46 @@ export default function SatelliteHoleMap({
               <circle cx={pinScreen.x} cy={pinScreen.y} r="6" fill="#EF4444" stroke="#fff" strokeWidth="1.6" />
             </g>
           )}
-          {fill && ballPoint && aimBearing != null && Number.isFinite(carry) && carry > 0 && (
-            <g fill="none" stroke="#10B981" strokeWidth="1.25" opacity="0.55">
-              <path d={arcPath(view.project, ballPoint, aimBearing, carry, 18)} />
-              <path d={arcPath(view.project, ballPoint, aimBearing, Math.max(10, carry * 0.82), 12)} strokeDasharray="3 3" opacity="0.8" />
-            </g>
+          {hazardPick && features.filter((feature) => feature.id === hazardPick.id).map((feature) => (
+            feature.rings.map((ring, index) => (
+              <path
+                key={`hazard-${feature.id}-${index}`}
+                d={ringPath(ring, view.project, true)}
+                fill="rgba(212,175,55,0.18)"
+                stroke="#D4AF37"
+                strokeWidth="2.6"
+              />
+            ))
+          ))}
+          {fill && reticle && Number.isFinite(leg1Yards) && leg1Yards > 0 && (
+            <path
+              d={dispersionPath(view.project, reticle, aimLineBearing, spreadAlong, spreadLateral)}
+              fill="rgba(16,185,129,0.16)"
+              stroke="#10B981"
+              strokeWidth="1"
+              opacity="0.85"
+            />
+          )}
+          {fill && lieUnrot && reticleUnrot && (
+            <line x1={lieUnrot.x} y1={lieUnrot.y} x2={reticleUnrot.x} y2={reticleUnrot.y} stroke="#10B981" strokeWidth="2.5" strokeLinecap="round" />
+          )}
+          {fill && reticleUnrot && greenUnrot && (
+            <line x1={reticleUnrot.x} y1={reticleUnrot.y} x2={greenUnrot.x} y2={greenUnrot.y} stroke="#D4AF37" strokeWidth="2" strokeDasharray="7 5" strokeLinecap="round" />
           )}
           {fill && shotPath && (
             <path d={shotPath} fill="none" stroke="#D4AF37" strokeWidth="2.6" strokeLinejoin="round" strokeLinecap="round" />
           )}
           {fill && shotScreens.map((shot) => (
-            <g key={`shot-${shot.shotNumber}`}>
+            <g key={`shot-${shot.shotNumber}`} transform={`rotate(${-heading} ${shot.x} ${shot.y})`}>
               <circle cx={shot.x} cy={shot.y} r="9" fill="#D4AF37" stroke="#0B0D0C" strokeWidth="1.4" />
               <text x={shot.x} y={shot.y + 3.5} textAnchor="middle" fontSize="10" fontWeight="700" fill="#0B0D0C">{shot.shotNumber}</text>
             </g>
           ))}
-          {fill && ballScreen && targetScreen && (
-            <line
-              x1={ballScreen.x}
-              y1={ballScreen.y}
-              x2={targetScreen.x}
-              y2={targetScreen.y}
-              stroke="#10B981"
-              strokeWidth="1.6"
-              strokeDasharray="5 4"
-            />
+          {fill && greenUnrot && (
+            <circle cx={greenUnrot.x} cy={greenUnrot.y} r="5" fill="#10B981" stroke="#F8FAFC" strokeWidth="1.4" />
+          )}
+          {fill && targetScreen && aimTarget !== 'center' && (
+            <circle cx={targetScreen.x} cy={targetScreen.y} r="4" fill="#D4AF37" stroke="#0B0D0C" strokeWidth="1.2" />
           )}
           {fill && liveScreen && (
             <g>
@@ -1105,35 +1440,63 @@ export default function SatelliteHoleMap({
             </g>
           )}
         </svg>
+        </div>
 
-        {fill && (
+        {fill && lieUp && reticleUp && Number.isFinite(leg1Yards) && (
           <div
-            className="absolute left-3 z-10 flex flex-col gap-1.5 top-[calc(env(safe-area-inset-top)+4.75rem)]"
+            className="pointer-events-none absolute z-10 max-w-[7.5rem] -translate-y-1/2 rounded-full border border-white/15 bg-[#0B0D0C]/85 px-2 py-0.5 text-white backdrop-blur-md"
+            style={{ left: (lieUp.x + reticleUp.x) / 2 + 16, top: (lieUp.y + reticleUp.y) / 2 }}
+          >
+            <div className="tabular-nums text-[11px] font-bold leading-tight text-[#10B981]">{formatDistance(leg1Yards)}</div>
+            {legClubName ? <div className="truncate text-[10px] font-semibold leading-tight">{legClubName}</div> : null}
+          </div>
+        )}
+        {fill && reticleUp && greenUp && Number.isFinite(leg2Yards) && (
+          <div
+            className="pointer-events-none absolute z-10 -translate-y-1/2 rounded-full border border-[#D4AF37]/40 bg-[#0B0D0C]/85 px-2 py-0.5 backdrop-blur-md"
+            style={{ left: (reticleUp.x + greenUp.x) / 2 + 16, top: (reticleUp.y + greenUp.y) / 2 }}
+          >
+            <div className="tabular-nums text-[11px] font-bold leading-tight text-[#D4AF37]">{formatDistance(leg2Yards)}</div>
+          </div>
+        )}
+        {fill && reticleUp && (
+          <button
+            type="button"
+            aria-label="Aim target"
+            className="absolute z-10 h-11 w-11 -translate-x-1/2 -translate-y-1/2"
+            style={{ left: reticleUp.x, top: reticleUp.y }}
+            onPointerDown={onReticlePointerDown}
+            onPointerMove={onReticlePointerMove}
+            onPointerUp={onReticlePointerUp}
+            onPointerCancel={onReticlePointerUp}
+          >
+            <span className="absolute inset-1 rounded-full border-2 border-[#10B981]" />
+            <span className="absolute left-1/2 top-1 h-9 w-px -translate-x-1/2 bg-[#10B981]" />
+            <span className="absolute left-1 top-1/2 h-px w-9 -translate-y-1/2 bg-[#10B981]" />
+            <span className="absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#D4AF37]" />
+          </button>
+        )}
+        {fill && hazardPick && hazardUp && (
+          <div
+            className="absolute z-20 min-w-[6.5rem] rounded-2xl border-2 border-[#D4AF37]/70 bg-[#0B0D0C]/90 px-2.5 py-1.5 text-white shadow-lg backdrop-blur-md"
+            style={{ left: hazardUp.x, top: hazardUp.y, transform: 'translate(-50%, -120%)' }}
             onPointerDown={(event) => event.stopPropagation()}
           >
-            {modeToggle}
-            <button
-              type="button"
-              onClick={() => recordShotRef.current(liveRef.current || ballPoint || viewCenterRef.current)}
-              className="min-h-[44px] rounded-2xl bg-[#0B0D0C]/85 px-2.5 text-[11px] font-semibold text-white backdrop-blur-md"
-            >
-              Log Shot
-            </button>
-            <button
-              type="button"
-              onClick={frameGps}
-              aria-label="Re-center on GPS"
-              className="min-h-[44px] rounded-2xl bg-[#0B0D0C]/85 px-2.5 text-[11px] font-semibold text-[#10B981] backdrop-blur-md"
-            >
-              GPS
-            </button>
+            <div className="text-[9px] font-semibold uppercase tracking-wider text-[#D4AF37]">
+              {hazardPick.kind === 'water' ? 'Water' : 'Bunker'}
+            </div>
+            <div className="tabular-nums text-sm font-bold leading-tight">Carry {formatDistance(hazardPick.carryYards)}</div>
+            <div className="tabular-nums text-[11px] leading-tight text-white/80">Clear {formatDistance(hazardPick.clearYards)}</div>
           </div>
         )}
 
         <div
-          className={`absolute z-10 flex flex-col overflow-hidden rounded-xl border daylight-border ${fill ? 'right-3 top-[calc(env(safe-area-inset-top)+4.75rem)]' : 'top-2 right-2'}`}
-          style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
+          className={`absolute z-30 flex flex-col items-end gap-1.5 ${fill ? 'right-2 top-[calc(env(safe-area-inset-top)+4.75rem)]' : 'top-2 right-2'}`}
           onPointerDown={(event) => event.stopPropagation()}
+        >
+        <div
+          className="flex flex-col overflow-hidden rounded-xl border-2 daylight-border"
+          style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
         >
           <button
             type="button"
@@ -1154,6 +1517,18 @@ export default function SatelliteHoleMap({
           >
             −
           </button>
+        </div>
+        {fill && (
+          <button
+            type="button"
+            onClick={frameGps}
+            aria-label="Re-center on GPS"
+            className="min-h-[44px] min-w-[44px] rounded-2xl border-2 border-white/15 bg-[#0B0D0C]/85 px-2.5 text-[11px] font-semibold text-[#10B981] backdrop-blur-md"
+          >
+            GPS
+          </button>
+        )}
+        {fill && modeToggle}
         </div>
 
         {mode === 'satellite' && (

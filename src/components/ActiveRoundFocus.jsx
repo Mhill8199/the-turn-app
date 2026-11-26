@@ -108,6 +108,8 @@ export default function ActiveRoundFocus({
   fallbackClubName = '',
   fallbackCarryYards = null,
   suggestion = '',
+  holeScore = null,
+  onHoleScore,
   children,
 }) {
   const { distanceUnit, toggleDistanceUnit, speedUnit } = useUnits();
@@ -141,7 +143,6 @@ export default function ActiveRoundFocus({
   const clubCarry = matched ? Number(matched.carry_yards) : Number(fallbackCarryYards);
   const deltaLabel = `${deltaYards > 0 ? '+' : ''}${deltaYards}`;
   const ttsLocale = resolveTtsLocale(lang);
-  const shotNumber = shotList.length + 1;
 
   useEffect(() => {
     if (shotList.length === 0) {
@@ -187,81 +188,103 @@ export default function ActiveRoundFocus({
     setPersonaId(saveCaddiePersonaId(id));
   };
 
+  const holeYards = Number.isFinite(Number(centerYards)) ? Number(centerYards) : scoreCenter;
+  const yardagePills = [
+    { id: 'back', label: 'Back', yards: backDist, accent: false },
+    { id: 'center', label: 'Center', yards: centerDist, accent: true },
+    { id: 'front', label: 'Front', yards: frontDist, accent: false },
+  ];
+
   return (
     <div className="fixed inset-0 z-40 h-[100dvh] w-screen overflow-hidden" style={{ backgroundColor: '#0B0D0C' }}>
       <div className="absolute inset-0 h-full w-full">{children}</div>
 
-      <header className="pointer-events-none absolute inset-x-0 top-0 z-20 pt-[env(safe-area-inset-top)]">
-        <div className="pointer-events-auto mx-2 mt-1 rounded-3xl border-2 border-white/15 daylight-border bg-[#0B0D0C]/85 px-2 py-1 text-white shadow-lg backdrop-blur-md">
-          <div className="truncate px-1 text-[11px] font-semibold leading-tight">{courseName || 'Active round'}</div>
-          <div className="flex items-center gap-1">
+      <header className="pointer-events-none absolute inset-x-0 top-0 z-50 pt-[env(safe-area-inset-top)]" aria-label={courseName || 'Active round'}>
+        <div className="pointer-events-auto mx-2 mt-1 flex items-center gap-1 rounded-3xl border-2 border-white/15 daylight-border bg-[#0B0D0C]/85 px-1 py-1 text-white shadow-lg backdrop-blur-md">
+          <div className="flex min-h-[44px] min-w-0 flex-1 items-center">
             <button
               type="button"
               onClick={onPrev}
               disabled={!canPrev}
               aria-label="Previous hole"
-              className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-2xl disabled:opacity-40"
+              className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-2xl disabled:opacity-40"
             >
               <ChevronLeft size={18} />
             </button>
-            <div className="min-w-0 text-center text-xs font-bold leading-tight whitespace-nowrap">
+            <div className="min-w-0 flex-1 truncate text-center text-[11px] font-bold leading-tight">
+              <span className="sr-only">{courseName || 'Active round'}. </span>
               Hole <span className="tabular-nums">{holeNumber}</span>
-              <span className="text-white/70"> / Par </span>
+              <span className="text-white/70"> • Par </span>
               <span className="tabular-nums">{par}</span>
+              <span className="text-white/70"> • </span>
+              <span className="tabular-nums">{formatDistance(holeYards, distanceUnit)}</span>
             </div>
             <button
               type="button"
               onClick={onNext}
               disabled={!canNext}
               aria-label="Next hole"
-              className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-2xl disabled:opacity-40"
+              className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-2xl disabled:opacity-40"
             >
               <ChevronRight size={18} />
             </button>
-            <div className="px-1 text-[11px] font-semibold leading-tight whitespace-nowrap">
-              Shot <span className="tabular-nums">{shotNumber}</span>
-            </div>
-            <button
-              type="button"
-              onClick={toggleDistanceUnit}
-              aria-label={distanceUnit === 'm' ? 'Distance unit meters. Switch to yards' : 'Distance unit yards. Switch to meters'}
-              className="min-h-[44px] rounded-2xl border border-white/20 px-2 text-[11px] font-semibold"
-            >
-              {distanceUnit === 'm' ? 'M' : 'YDS'}
-            </button>
-            <button
-              type="button"
-              onClick={onEndRound}
-              className="ml-auto min-h-[44px] whitespace-nowrap rounded-2xl px-2.5 text-[11px] font-semibold text-[#0B0D0C]"
-              style={{ backgroundColor: '#10B981' }}
-            >
-              End Round
-            </button>
           </div>
+          <div className="inline-flex min-h-[44px] shrink-0 items-center gap-1 rounded-full bg-white/10 px-2" aria-label="Live wind">
+            <WindArrow kind={kind} />
+            <span className="tabular-nums text-[11px] font-semibold">{formatSpeed(windMph, speedUnit)}</span>
+          </div>
+          <button
+            type="button"
+            onClick={toggleDistanceUnit}
+            aria-label={distanceUnit === 'm' ? 'Distance unit meters. Switch to yards' : 'Distance unit yards. Switch to meters'}
+            className="min-h-[44px] shrink-0 rounded-2xl border border-white/20 px-2 text-[11px] font-semibold"
+          >
+            {distanceUnit === 'm' ? 'M' : 'YDS'}
+          </button>
+          <button
+            type="button"
+            onClick={onEndRound}
+            className="min-h-[44px] shrink-0 whitespace-nowrap rounded-2xl px-2.5 text-[11px] font-semibold text-[#0B0D0C]"
+            style={{ backgroundColor: '#10B981' }}
+          >
+            End Round
+          </button>
         </div>
       </header>
 
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-        <div className="pointer-events-auto rounded-3xl border-2 border-white/15 daylight-border bg-[#0B0D0C]/85 px-3 py-2 text-white shadow-lg backdrop-blur-md">
-          <div className="flex items-center gap-2">
+      <div className="pointer-events-none absolute left-2 z-50 flex flex-col gap-1.5 top-[calc(env(safe-area-inset-top)+4.35rem)]">
+        {yardagePills.map((pill) => (
+          <div
+            key={pill.id}
+            className={`min-h-[44px] rounded-full border-2 px-3 py-1 backdrop-blur-md tabular-nums ${pill.accent ? 'border-[#10B981] text-[#10B981]' : 'border-white/15 text-white'} bg-[#0B0D0C]/85 daylight-border`}
+          >
+            <div className="text-[9px] font-semibold uppercase tracking-wider">{pill.label}</div>
+            <div className="text-sm font-bold leading-none">{formatDistance(pill.yards, distanceUnit)}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-50 px-2 pb-[env(safe-area-inset-bottom)]">
+        <div className="pointer-events-auto mb-2 rounded-3xl border-2 border-white/15 daylight-border bg-[#0B0D0C]/85 px-2.5 py-2 text-white shadow-lg backdrop-blur-md">
+          <div className="flex items-center gap-1.5">
+            <div className="min-w-0">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-[#D4AF37]">Plays Like</div>
+              <div className="tabular-nums text-2xl font-bold leading-none text-[#10B981]">{formatDistance(playsLikeYards, distanceUnit)}</div>
+            </div>
             <div className="min-w-0 flex-1">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-[#10B981]">Center Green</div>
-              <div className="tabular-nums text-2xl font-bold leading-none text-[#10B981]">{formatDistance(centerDist, distanceUnit)}</div>
-              <div className="mt-0.5 flex gap-1">
-                <span className="rounded-full bg-white/10 px-1.5 py-0.5 text-[10px] tabular-nums">F {formatDistance(frontDist, distanceUnit)}</span>
-                <span className="rounded-full bg-white/10 px-1.5 py-0.5 text-[10px] tabular-nums">B {formatDistance(backDist, distanceUnit)}</span>
-              </div>
-              {lastShot && (
-                <div className="mt-0.5 truncate text-[10px] text-white/85">
-                  Last Shot: <span className="tabular-nums">{formatDistance(lastShot.distanceFromPrev, distanceUnit)}</span> • {lastShot.clubUsed}
-                </div>
-              )}
-            </div>
-            <div className="min-w-0 text-right">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-[#10B981]">Suggested Club</div>
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-[#D4AF37]">Recommended Club</div>
               <div className="truncate text-sm font-bold leading-tight">{clubName}</div>
-              {clubSpec ? <div className="truncate text-[10px] font-normal text-white/65">{clubSpec}</div> : null}
+              {clubSpec ? <div className="truncate text-[10px] font-medium text-white/60">{clubSpec}</div> : null}
             </div>
+            <button
+              type="button"
+              onClick={speak}
+              aria-label="Caddie Callout"
+              className="inline-flex min-h-[44px] shrink-0 items-center gap-1 rounded-2xl border border-white/20 px-2 text-[11px] font-semibold"
+            >
+              <Volume2 size={15} />
+              Callout
+            </button>
             <button
               type="button"
               onClick={() => onMarkShot?.(clubName)}
@@ -274,7 +297,7 @@ export default function ActiveRoundFocus({
               type="button"
               onClick={() => setDetailsOpen((open) => !open)}
               aria-expanded={detailsOpen}
-              aria-label="Shot details"
+              aria-label="Pin, lie, score, and shots"
               className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-2xl border border-white/20 text-sm"
             >
               {detailsOpen ? '▴' : '▾'}
@@ -282,7 +305,7 @@ export default function ActiveRoundFocus({
           </div>
 
           {detailsOpen && (
-            <div className="mt-2 max-h-[28vh] space-y-2 overflow-y-auto">
+            <div className="mt-2 max-h-[26vh] space-y-2 overflow-y-auto">
               <div>
                 <div className="text-[10px] font-semibold uppercase tracking-wider text-[#10B981]">Pin</div>
                 <div className="mt-1 flex gap-1">
@@ -314,6 +337,43 @@ export default function ActiveRoundFocus({
                 </div>
                 <div className="text-[11px] text-white/80">{suggestion || 'Aim at the middle of the green.'}</div>
               </div>
+              {holeScore && typeof onHoleScore === 'function' && (
+                <div>
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-[#D4AF37]">Score</div>
+                  <div className="mt-1 flex flex-wrap items-center gap-1">
+                    <span className="text-[11px]">Strokes</span>
+                    <button type="button" aria-label="Fewer strokes" onClick={() => onHoleScore({ strokes: Number(holeScore.strokes) - 1 })} className="min-h-[44px] min-w-[44px] rounded-2xl border border-white/20 text-sm font-bold">−</button>
+                    <span className="w-6 text-center text-sm font-bold tabular-nums">{holeScore.strokes}</span>
+                    <button type="button" aria-label="More strokes" onClick={() => onHoleScore({ strokes: Number(holeScore.strokes) + 1 })} className="min-h-[44px] min-w-[44px] rounded-2xl border border-white/20 text-sm font-bold">+</button>
+                    <span className="ml-1 text-[11px]">Putts</span>
+                    <button type="button" aria-label="Fewer putts" onClick={() => onHoleScore({ putts: Number(holeScore.putts) - 1 })} className="min-h-[44px] min-w-[44px] rounded-2xl border border-white/20 text-sm font-bold">−</button>
+                    <span className="w-6 text-center text-sm font-bold tabular-nums">{holeScore.putts}</span>
+                    <button type="button" aria-label="More putts" onClick={() => onHoleScore({ putts: Number(holeScore.putts) + 1 })} className="min-h-[44px] min-w-[44px] rounded-2xl border border-white/20 text-sm font-bold">+</button>
+                  </div>
+                  {par > 3 && (
+                    <div className="mt-1 grid grid-cols-3 gap-1">
+                      {[
+                        { id: 'left', label: 'Miss L' },
+                        { id: 'hit', label: 'Fairway' },
+                        { id: 'right', label: 'Miss R' },
+                      ].map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => onHoleScore({ fir: opt.id })}
+                          className="min-h-[44px] rounded-2xl border text-[11px] font-semibold"
+                          style={{
+                            borderColor: holeScore.fir === opt.id ? '#10B981' : 'rgba(255,255,255,0.2)',
+                            color: holeScore.fir === opt.id ? '#10B981' : '#fff',
+                          }}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               <div>
                 <div className="text-[10px] font-semibold uppercase tracking-wider text-[#10B981]">Lie</div>
                 <div className="mt-1 grid grid-cols-4 gap-1">
@@ -334,7 +394,7 @@ export default function ActiveRoundFocus({
                 </div>
               </div>
               <div>
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-[#10B981]">Shot history</div>
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-[#10B981]">Shot list</div>
                 {shotList.length === 0 ? (
                   <div className="text-[11px] text-white/70">No shots logged on this hole.</div>
                 ) : (
@@ -374,16 +434,6 @@ export default function ActiveRoundFocus({
                   Preview Voice
                 </button>
               </div>
-              <button
-                type="button"
-                onClick={speak}
-                aria-label="Play caddie callout"
-                className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl px-3 text-xs font-semibold text-[#0B0D0C]"
-                style={{ backgroundColor: '#10B981' }}
-              >
-                <Volume2 size={16} />
-                Audio Caddie
-              </button>
             </div>
           )}
         </div>
