@@ -34,7 +34,7 @@ import SatelliteHoleMap from '../components/SatelliteHoleMap';
 import ActiveRoundFocus from '../components/ActiveRoundFocus';
 import { useUnits } from '../utils/distanceUnits';
 import { useLanguage } from '../i18n/LanguageContext';
-import { buildWearablePayload, resolveTtsLocale, speakCaddieCallout } from '../utils/wearableAndAudioCaddie';
+import { buildWearablePayload, readCaddiePersonaId, resolveTtsLocale, speakCaddieCallout } from '../utils/wearableAndAudioCaddie';
 
 const CUSTOM_COURSES_KEY = 'the-turn-custom-courses';
 const SCORES_KEY = 'the-turn-scores-v2';
@@ -708,7 +708,8 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
     speakCaddieCallout(
       { holeNumber: activeHole.number, club: caddieClub, targetYards: caddieYards, wind: aimAdvice },
       caddieUnit,
-      ttsLocale
+      ttsLocale,
+      readCaddiePersonaId()
     );
   }, [activeHole.number]);
 
@@ -728,7 +729,8 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
     speakCaddieCallout(
       { holeNumber: activeHole.number, club: caddieClub, targetYards: caddieYards, wind: aimAdvice },
       caddieUnit,
-      ttsLocale
+      ttsLocale,
+      readCaddiePersonaId()
     );
   };
 

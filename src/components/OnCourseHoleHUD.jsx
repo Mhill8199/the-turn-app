@@ -4,7 +4,7 @@ import ActiveRoundFocus from './ActiveRoundFocus';
 import SatelliteHoleMap from './SatelliteHoleMap';
 import { useLanguage } from '../i18n/LanguageContext';
 import { useUnits } from '../utils/distanceUnits';
-import { buildWearablePayload, resolveTtsLocale, speakCaddieCallout } from '../utils/wearableAndAudioCaddie';
+import { buildWearablePayload, readCaddiePersonaId, resolveTtsLocale, speakCaddieCallout } from '../utils/wearableAndAudioCaddie';
 
 export default function OnCourseHoleHUD({
   holeNumber: initialHole = 1,
@@ -53,7 +53,8 @@ export default function OnCourseHoleHUD({
     speakCaddieCallout(
       { holeNumber, club: recommendedClub, targetYards: yardage, wind: windNote },
       unit,
-      ttsLocale
+      ttsLocale,
+      readCaddiePersonaId()
     );
   };
 

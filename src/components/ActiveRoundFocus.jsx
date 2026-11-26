@@ -2,7 +2,14 @@ import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronLeft, ChevronRight, M
 import { useEffect, useState } from 'react';
 import { useLanguage } from '../i18n/LanguageContext';
 import { formatDistance, formatSpeed, useUnits } from '../utils/distanceUnits';
-import { resolveTtsLocale, speakCaddieCallout } from '../utils/wearableAndAudioCaddie';
+import {
+  CADDIE_VOICES,
+  previewCaddieCallout,
+  readCaddiePersonaId,
+  resolveTtsLocale,
+  saveCaddiePersonaId,
+  speakCaddieCallout,
+} from '../utils/wearableAndAudioCaddie';
 
 function closestClub(clubs, playsLikeYards) {
   const list = Array.isArray(clubs) ? clubs : [];
@@ -121,6 +128,7 @@ export default function ActiveRoundFocus({
   const { distanceUnit, toggleDistanceUnit, speedUnit } = useUnits();
   const { lang } = useLanguage();
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [personaId, setPersonaId] = useState(readCaddiePersonaId);
   const [lie, setLie] = useState('tee');
   const [pinChoice, setPinChoice] = useState('center');
   const shotList = Array.isArray(shots) ? shots : [];
@@ -184,8 +192,13 @@ export default function ActiveRoundFocus({
         advice: suggestion,
       },
       distanceUnit,
-      ttsLocale
+      ttsLocale,
+      personaId
     );
+  };
+
+  const selectPersona = (id) => {
+    setPersonaId(saveCaddiePersonaId(id));
   };
 
   return (
@@ -346,6 +359,33 @@ export default function ActiveRoundFocus({
                     ))}
                   </ul>
                 )}
+              </div>
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-[#10B981]">Caddie voice</div>
+                <div className="mt-1 flex flex-wrap gap-1" role="group" aria-label="Caddie voice">
+                  {CADDIE_VOICES.map((voice) => (
+                    <button
+                      key={voice.id}
+                      type="button"
+                      onClick={() => selectPersona(voice.id)}
+                      aria-pressed={personaId === voice.id}
+                      className="min-h-[44px] rounded-full border px-3 text-[11px] font-semibold"
+                      style={{
+                        borderColor: personaId === voice.id ? '#10B981' : 'rgba(255,255,255,0.2)',
+                        color: personaId === voice.id ? '#10B981' : '#fff',
+                      }}
+                    >
+                      {voice.label}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => previewCaddieCallout(personaId, ttsLocale)}
+                  className="mt-1 inline-flex min-h-[44px] items-center rounded-2xl border border-white/20 px-3 text-xs font-semibold"
+                >
+                  Preview Voice
+                </button>
               </div>
               <button
                 type="button"
