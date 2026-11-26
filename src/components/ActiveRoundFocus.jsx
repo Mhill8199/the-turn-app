@@ -11,6 +11,9 @@ import {
   speakCaddieCallout,
 } from '../utils/wearableAndAudioCaddie';
 import { closestActiveClub, clubSpecSubtitle } from '../utils/bagClubs';
+import { formatZoneLabel, readStandingPosition } from '../utils/pinPlacements';
+import { PIN_SCOUT_EVENT } from '../utils/pinScout';
+import { useAuth } from '../context/AuthContext';
 
 /** Headwind is wind blowing into the shot (positive). Tailwind is negative. */
 function relativeWind(windSpeedMph, windDirDeg, holeBearingDeg) {
@@ -83,6 +86,197 @@ const LIE_OPTIONS = [
   { id: 'bunker', label: 'Bunker' },
 ];
 
+function alongYards(origin, point, bearingDeg) {
+  const dist = yardsBetween(origin, point);
+  if (!Number.isFinite(dist)) return null;
+  const lat1 = (Number(origin.lat) * Math.PI) / 180;
+  const lat2 = (Number(point.lat) * Math.PI) / 180;
+  const dLon = ((Number(point.lon) - Number(origin.lon)) * Math.PI) / 180;
+  const y = Math.sin(dLon) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+  const bearing = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+  let delta = bearing - (Number(bearingDeg) || 0);
+  if (delta > 180) delta -= 360;
+  if (delta < -180) delta += 360;
+  return dist * Math.cos((delta * Math.PI) / 180);
+}
+
+export function PinFinishSheet({
+  open = false,
+  floating = false,
+  pinPlaceMode = false,
+  startWithMethods = false,
+  holeScore = null,
+  onHoleScore,
+  canAdvance = false,
+  onAdvance,
+  onClose,
+  onCommitPin,
+  onBeginFlagDrag,
+  onLockFlag,
+}) {
+  const [methodsOpen, setMethodsOpen] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      setMethodsOpen(false);
+      setNotice('');
+      setBusy(false);
+      return;
+    }
+    if (startWithMethods) setMethodsOpen(true);
+  }, [open, startWithMethods]);
+
+  if (!open) return null;
+
+  const useGps = async () => {
+    setBusy(true);
+    setNotice('Reading GPS…');
+    try {
+      const point = await readStandingPosition();
+      const saved = await onCommitPin?.(point);
+      setNotice(saved?.green_zone ? `Locked ${formatZoneLabel(saved.green_zone)}` : 'Saved on this device');
+    } catch (error) {
+      setNotice(error?.message || 'GPS unavailable. Drag the flag on the green.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const lockFlag = async () => {
+    setBusy(true);
+    try {
+      const saved = await onLockFlag?.();
+      setNotice(saved?.green_zone ? `Locked ${formatZoneLabel(saved.green_zone)}` : 'Saved on this device');
+    } catch {
+      setNotice('Saved on this device');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className={floating ? 'fixed inset-x-0 bottom-0 z-50 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]' : 'pointer-events-auto mb-2'}>
+      <div className="rounded-3xl border border-white/15 bg-[#0B0D0C]/85 px-3 py-2 text-white shadow-lg backdrop-blur-md">
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-[#10B981]">Hole complete</div>
+          <button type="button" onClick={onClose} className="min-h-[44px] rounded-2xl px-2 text-[11px] font-semibold text-white/80">Close</button>
+        </div>
+        {holeScore && typeof onHoleScore === 'function' && (
+          <div className="mt-1 flex items-center gap-1">
+            <span className="text-[11px]">Putts</span>
+            <button type="button" aria-label="Fewer putts" onClick={() => onHoleScore({ putts: Number(holeScore.putts) - 1 })} className="min-h-[44px] min-w-[44px] rounded-2xl border border-white/20 text-sm font-bold">−</button>
+            <span className="w-6 text-center text-sm font-bold tabular-nums">{holeScore.putts}</span>
+            <button type="button" aria-label="More putts" onClick={() => onHoleScore({ putts: Number(holeScore.putts) + 1 })} className="min-h-[44px] min-w-[44px] rounded-2xl border border-white/20 text-sm font-bold">+</button>
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => setMethodsOpen(true)}
+          className="mt-1 min-h-[44px] w-full rounded-2xl text-xs font-semibold text-[#0B0D0C]"
+          style={{ backgroundColor: '#10B981' }}
+        >
+          Mark Pin
+        </button>
+        {methodsOpen && (
+          <div className="mt-1 space-y-1">
+            <button
+              type="button"
+              onClick={useGps}
+              disabled={busy}
+              className="min-h-[44px] w-full rounded-2xl border border-[#10B981]/50 px-2 text-[11px] font-semibold text-[#10B981] disabled:opacity-50"
+            >
+              Use My Current GPS Standing at Hole
+            </button>
+            <button
+              type="button"
+              onClick={onBeginFlagDrag}
+              className="min-h-[44px] w-full rounded-2xl border border-white/20 px-2 text-[11px] font-semibold"
+            >
+              Drag Flag on the Green
+            </button>
+            {pinPlaceMode && (
+              <button
+                type="button"
+                onClick={lockFlag}
+                disabled={busy}
+                className="min-h-[44px] w-full rounded-2xl px-2 text-xs font-semibold text-[#0B0D0C] disabled:opacity-50"
+                style={{ backgroundColor: '#10B981' }}
+              >
+                Lock Flag
+              </button>
+            )}
+            {notice ? <div className="text-[11px] text-[#10B981]">{notice}</div> : null}
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={onAdvance}
+          className="mt-1 min-h-[44px] w-full rounded-2xl border border-white/20 text-xs font-semibold"
+        >
+          {canAdvance ? 'Next Hole' : 'Done'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function PinScoutToast() {
+  const auth = useAuth();
+  const patchProfile = auth?.patchProfile;
+  const [toast, setToast] = useState(null);
+
+  useEffect(() => {
+    let timer = 0;
+    const onAward = (event) => {
+      const detail = event.detail;
+      if (!detail?.awarded) return;
+      patchProfile?.({ pins_marked: detail.pinsMarked, scout_xp: detail.scoutXp });
+      setToast(detail);
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => setToast(null), 4600);
+    };
+    window.addEventListener(PIN_SCOUT_EVENT, onAward);
+    return () => {
+      window.removeEventListener(PIN_SCOUT_EVENT, onAward);
+      window.clearTimeout(timer);
+    };
+  }, [patchProfile]);
+
+  if (!toast) return null;
+  const unlock = toast.justUnlocked && toast.tier?.label ? `${toast.tier.label} unlocked. ` : '';
+
+  return (
+    <div
+      className="pointer-events-none fixed inset-x-0 z-[70] flex justify-center px-3 top-[calc(env(safe-area-inset-top)+4.5rem)]"
+      role="status"
+      aria-live="polite"
+    >
+      <div
+        className="pointer-events-auto flex min-h-[44px] w-full max-w-sm items-center gap-2 rounded-2xl px-3 py-2 shadow-lg"
+        style={{ backgroundColor: '#D4AF37', color: '#0B0D0C' }}
+      >
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-bold leading-tight">+25 XP • Pin Scout (+1 Daily Pin Logged)</div>
+          <div className="text-[11px] font-medium leading-snug">
+            {unlock}1 pin Pin Scout · 9 pins Course Ranger · 18 pins Tour Advance Scout
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setToast(null)}
+          className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-xl text-lg font-bold"
+          aria-label="Dismiss Pin Scout toast"
+        >
+          ×
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function ActiveRoundFocus({
   courseName = '',
   holeNumber = 1,
@@ -110,6 +304,16 @@ export default function ActiveRoundFocus({
   suggestion = '',
   holeScore = null,
   onHoleScore,
+  livePin = null,
+  pinTendency = '',
+  onConfirmPin,
+  pinSheetOpen = false,
+  pinSheetMode = 'finish',
+  onOpenPinSheet,
+  pinPlaceMode = false,
+  onCommitPin,
+  onBeginFlagDrag,
+  onLockFlag,
   children,
 }) {
   const { distanceUnit, toggleDistanceUnit, speedUnit } = useUnits();
@@ -131,12 +335,23 @@ export default function ActiveRoundFocus({
   const centerDist = (liePoint && centerPoint ? yardsBetween(liePoint, centerPoint) : null) ?? scoreCenter;
   const frontDist = (liePoint && frontPoint ? yardsBetween(liePoint, frontPoint) : null) ?? Math.max(0, scoreCenter - 12);
   const backDist = (liePoint && backPoint ? yardsBetween(liePoint, backPoint) : null) ?? scoreCenter + 14;
+  const pinLat = Number(livePin?.lat);
+  const pinLng = Number(livePin?.lng ?? livePin?.lon);
+  const hasLivePin = Number.isFinite(pinLat) && Number.isFinite(pinLng);
+  const pinPoint = hasLivePin ? { lat: pinLat, lon: pinLng } : null;
+  let exactPinDist = pinPoint && liePoint ? yardsBetween(liePoint, pinPoint) : null;
+  if (exactPinDist == null && pinPoint && centerPoint) {
+    const along = alongYards(centerPoint, pinPoint, holeBearingDeg);
+    if (Number.isFinite(along)) exactPinDist = Math.max(0, centerDist + along);
+  }
+  if (exactPinDist == null && hasLivePin) exactPinDist = centerDist;
+  const playsBase = hasLivePin && Number.isFinite(exactPinDist) ? exactPinDist : centerDist;
   const { windMph, deltaYards, kind } = relativeWind(windSpeedMph, windDirDeg, holeBearingDeg);
   // rough +5 yards, bunker +10, tee uses full carry. Fairway uses stock carry.
   const lieAdjust = lie === 'rough' ? 5 : lie === 'bunker' ? 10 : 0;
   // Headwind adds yards, tailwind subtracts. Course elevation adds about 2 yards per 1,000 ft when provided.
   const elevationDelta = Number.isFinite(Number(elevationFt)) ? Math.round(Number(elevationFt) / 500) : 0;
-  const playsLikeYards = Math.max(0, Math.round((Number(centerDist) || 0) + deltaYards + lieAdjust + elevationDelta));
+  const playsLikeYards = Math.max(0, Math.round((Number(playsBase) || 0) + deltaYards + lieAdjust + elevationDelta));
   const matched = closestActiveClub(clubs, playsLikeYards);
   const clubName = matched?.club_type || matched?.name || fallbackClubName || '—';
   const clubSpec = clubSpecSubtitle(matched);
@@ -173,7 +388,7 @@ export default function ActiveRoundFocus({
       {
         holeNumber,
         club: clubName,
-        targetYards: centerDist,
+        targetYards: hasLivePin && Number.isFinite(exactPinDist) ? exactPinDist : centerDist,
         playsLikeYards,
         wind: { direction: kind === 'calm' ? 'calm' : kind.replace('-', ' '), speed: formatSpeed(windMph, speedUnit) },
         advice: suggestion,
@@ -190,13 +405,15 @@ export default function ActiveRoundFocus({
 
   const holeYards = Number.isFinite(Number(centerYards)) ? Number(centerYards) : scoreCenter;
   const yardagePills = [
+    ...(hasLivePin ? [{ id: 'pin', label: 'Exact Pin', yards: exactPinDist, accent: true }] : []),
     { id: 'back', label: 'Back', yards: backDist, accent: false },
-    { id: 'center', label: 'Center', yards: centerDist, accent: true },
+    { id: 'center', label: 'Center', yards: centerDist, accent: !hasLivePin },
     { id: 'front', label: 'Front', yards: frontDist, accent: false },
   ];
 
   return (
     <div className="fixed inset-0 z-40 h-[100dvh] w-screen overflow-hidden" style={{ backgroundColor: '#0B0D0C' }}>
+      <PinScoutToast />
       <div className="absolute inset-0 h-full w-full">{children}</div>
 
       <header className="pointer-events-none absolute inset-x-0 top-0 z-50 pt-[env(safe-area-inset-top)]" aria-label={courseName || 'Active round'}>
@@ -221,7 +438,10 @@ export default function ActiveRoundFocus({
             </div>
             <button
               type="button"
-              onClick={onNext}
+              onClick={() => {
+                if (onOpenPinSheet) onOpenPinSheet(true);
+                else onNext?.();
+              }}
               disabled={!canNext}
               aria-label="Next hole"
               className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-2xl disabled:opacity-40"
@@ -262,9 +482,39 @@ export default function ActiveRoundFocus({
             <div className="text-sm font-bold leading-none">{formatDistance(pill.yards, distanceUnit)}</div>
           </div>
         ))}
+        {hasLivePin && (
+          <div className="pointer-events-auto flex flex-col gap-1">
+            <div className="rounded-full border border-[#10B981]/50 bg-[#0B0D0C]/85 px-2.5 py-1 text-[9px] font-semibold tracking-wide text-[#10B981] backdrop-blur-md">
+              LIVE PIN • Verified Today
+            </div>
+            <button
+              type="button"
+              onClick={() => onConfirmPin?.()}
+              className="min-h-[44px] rounded-full border border-[#10B981]/50 bg-[#0B0D0C]/85 px-3 text-[11px] font-semibold text-[#10B981] backdrop-blur-md"
+            >
+              Confirm Pin <span className="tabular-nums">· {Number(livePin?.confirmations) || 0}</span>
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-50 px-2 pb-[env(safe-area-inset-bottom)]">
+        <PinFinishSheet
+          open={pinSheetOpen}
+          pinPlaceMode={pinPlaceMode}
+          startWithMethods={pinSheetMode === 'mark'}
+          holeScore={holeScore}
+          onHoleScore={onHoleScore}
+          canAdvance={canNext}
+          onAdvance={() => {
+            if (canNext) onNext?.();
+            else onOpenPinSheet?.(false);
+          }}
+          onClose={() => onOpenPinSheet?.(false)}
+          onCommitPin={onCommitPin}
+          onBeginFlagDrag={onBeginFlagDrag}
+          onLockFlag={onLockFlag}
+        />
         <div className="pointer-events-auto mb-2 rounded-3xl border-2 border-white/15 daylight-border bg-[#0B0D0C]/85 px-2.5 py-2 text-white shadow-lg backdrop-blur-md">
           <div className="flex items-center gap-1.5">
             <div className="min-w-0">
@@ -306,6 +556,11 @@ export default function ActiveRoundFocus({
 
           {detailsOpen && (
             <div className="mt-2 max-h-[26vh] space-y-2 overflow-y-auto">
+              {pinTendency ? (
+                <div className="rounded-2xl border border-[#10B981]/40 bg-[#0B0D0C]/85 px-3 py-2 text-[11px] font-semibold text-[#10B981] backdrop-blur-md">
+                  {pinTendency}
+                </div>
+              ) : null}
               <div>
                 <div className="text-[10px] font-semibold uppercase tracking-wider text-[#10B981]">Pin</div>
                 <div className="mt-1 flex gap-1">
@@ -349,6 +604,14 @@ export default function ActiveRoundFocus({
                     <button type="button" aria-label="Fewer putts" onClick={() => onHoleScore({ putts: Number(holeScore.putts) - 1 })} className="min-h-[44px] min-w-[44px] rounded-2xl border border-white/20 text-sm font-bold">−</button>
                     <span className="w-6 text-center text-sm font-bold tabular-nums">{holeScore.putts}</span>
                     <button type="button" aria-label="More putts" onClick={() => onHoleScore({ putts: Number(holeScore.putts) + 1 })} className="min-h-[44px] min-w-[44px] rounded-2xl border border-white/20 text-sm font-bold">+</button>
+                    <button
+                      type="button"
+                      onClick={() => onOpenPinSheet?.(true, 'mark')}
+                      className="min-h-[44px] rounded-2xl px-3 text-[11px] font-semibold text-[#0B0D0C]"
+                      style={{ backgroundColor: '#10B981' }}
+                    >
+                      Mark Pin
+                    </button>
                   </div>
                   {par > 3 && (
                     <div className="mt-1 grid grid-cols-3 gap-1">

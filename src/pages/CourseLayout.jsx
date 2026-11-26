@@ -37,9 +37,11 @@ import {
   calculateShotPhysics,
 } from '../lib/weatherPhysics';
 import SatelliteHoleMap from '../components/SatelliteHoleMap';
-import ActiveRoundFocus from '../components/ActiveRoundFocus';
+import ActiveRoundFocus, { PinFinishSheet, PinScoutToast } from '../components/ActiveRoundFocus';
 import { useUnits, YARDS_TO_METERS } from '../utils/distanceUnits';
 import { useTheme } from '../context/ThemeContext';
+import { useAuth } from '../context/AuthContext';
+import { useHolePinFeed } from '../utils/pinPlacements';
 import { useLanguage } from '../i18n/LanguageContext';
 import { buildWearablePayload, readCaddiePersonaId, resolveTtsLocale, speakCaddieCallout } from '../utils/wearableAndAudioCaddie';
 import { activeBagClubs, clubSpecSubtitle } from '../utils/bagClubs';
@@ -180,6 +182,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   const { distanceUnit, formatDistance, formatSpeed } = useUnits();
   const { theme } = useTheme();
   const { lang } = useLanguage();
+  const auth = useAuth();
   const [caddiePayload, setCaddiePayload] = useState(null);
   const caddieHoleArmed = useRef(false);
   const [customCourses, setCustomCourses] = useState(() => {
@@ -261,6 +264,11 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   const [markRequest, setMarkRequest] = useState(null);
   const [suggestedClub, setSuggestedClub] = useState({ name: '', carry: null });
   const [aimTarget, setAimTarget] = useState('center');
+  const [pinSheetOpen, setPinSheetOpen] = useState(false);
+  const [pinSheetMode, setPinSheetMode] = useState('finish');
+  const [pinPlaceMode, setPinPlaceMode] = useState(false);
+  const [flagDraft, setFlagDraft] = useState(null);
+  const [greenRing, setGreenRing] = useState(null);
   const roundActiveRef = useRef(false);
   roundActiveRef.current = isRoundActive;
 
@@ -374,6 +382,54 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
     setMarkRequest(null);
     setAimTarget('center');
   }, [activeCourse.id, activeHole.number, isRoundActive]);
+
+  const pinFeed = useHolePinFeed({
+    courseId: activeCourse?.id,
+    courseName: activeCourse?.name,
+    holeNumber: activeHole?.number,
+    userId: auth?.user?.id ?? null,
+  });
+
+  useEffect(() => {
+    setPinPlaceMode(false);
+    setFlagDraft(null);
+    setPinSheetOpen(false);
+    setGreenRing(null);
+  }, [activeCourse.id, activeHole.number]);
+
+  const openPinSheet = (open, mode) => {
+    const nextOpen = open !== false;
+    setPinSheetOpen(nextOpen);
+    setPinSheetMode(mode === 'mark' ? 'mark' : 'finish');
+    if (!nextOpen) setPinPlaceMode(false);
+  };
+
+  const commitTodayPin = async (point) => {
+    const saved = await pinFeed.save({
+      lat: point?.lat,
+      lng: point?.lng ?? point?.lon,
+      greenCenter: resolveGreenCenter(activeCourse, activeHole),
+      holeBearingDeg: activeHole.bearingDeg,
+      greenRing,
+    });
+    if (saved) setPinPlaceMode(false);
+    return saved;
+  };
+
+  const beginFlagDrag = () => {
+    const center = resolveGreenCenter(activeCourse, activeHole);
+    const seed = flagDraft || pinFeed.livePin || center;
+    setFlagDraft({ lat: Number(seed?.lat), lng: Number(seed?.lng ?? seed?.lon) });
+    setPinPlaceMode(true);
+    setPinSheetOpen(true);
+    setPinSheetMode('mark');
+  };
+
+  const lockFlagDraft = () => {
+    const center = resolveGreenCenter(activeCourse, activeHole);
+    const point = flagDraft || pinFeed.livePin || center;
+    return commitTodayPin(point);
+  };
 
   useEffect(() => {
     setHoleNumber((activeCourse.holes?.length || 0) + 1);
@@ -959,6 +1015,8 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
           setRoundShots([]);
           setLiveRoundGps(null);
           setMarkRequest(null);
+          setPinSheetOpen(false);
+          setPinPlaceMode(false);
           setIsRoundActive(false);
         }}
         onMarkShot={(club) => setMarkRequest({ id: Date.now(), club })}
@@ -979,10 +1037,28 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         suggestion={activeHole.note || aimAdvice}
         holeScore={currentStat}
         onHoleScore={updateHoleStat}
+        livePin={pinFeed.livePin}
+        pinTendency={pinFeed.tendency}
+        onConfirmPin={pinFeed.confirm}
+        pinSheetOpen={pinSheetOpen}
+        pinSheetMode={pinSheetMode}
+        onOpenPinSheet={openPinSheet}
+        pinPlaceMode={pinPlaceMode}
+        onCommitPin={commitTodayPin}
+        onBeginFlagDrag={beginFlagDrag}
+        onLockFlag={lockFlagDraft}
       >
         <SatelliteHoleMap
           fill
           clubs={suggestionClubs}
+          livePin={pinFeed.livePin}
+          historyPins={pinFeed.history}
+          pinPlaceMode={pinPlaceMode}
+          flagDraft={flagDraft}
+          onFlagDraft={setFlagDraft}
+          onGreenGeometry={setGreenRing}
+          onRequestMarkPin={() => openPinSheet(true, 'mark')}
+          onConfirmPin={pinFeed.confirm}
           courseName={activeCourse.name}
           center={{ lat: activeCourse.lat, lon: activeCourse.lon }}
           hole={{
@@ -1558,8 +1634,20 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               par: activeHole.par,
               lat: activeHole.lat,
               lon: activeHole.lon,
+              yards: activeHole.yards,
+              bearingDeg: activeHole.bearingDeg,
+              greenLat: resolveGreenCenter(activeCourse, activeHole)?.lat,
+              greenLon: resolveGreenCenter(activeCourse, activeHole)?.lon,
             }}
             origin={shotStartGps ? { lat: shotStartGps.lat, lon: shotStartGps.lon } : undefined}
+            livePin={pinFeed.livePin}
+            historyPins={pinFeed.history}
+            pinPlaceMode={pinPlaceMode}
+            flagDraft={flagDraft}
+            onFlagDraft={setFlagDraft}
+            onGreenGeometry={setGreenRing}
+            onRequestMarkPin={() => openPinSheet(true, 'mark')}
+            onConfirmPin={pinFeed.confirm}
           />
 
           <div className="space-y-1.5">
@@ -1984,6 +2072,14 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
             </div>
           </div>
         </div>
+        <button
+          type="button"
+          onClick={() => openPinSheet(true, 'mark')}
+          className="min-h-[44px] w-full rounded-xl text-xs font-semibold text-[#0B0D0C]"
+          style={{ backgroundColor: '#10B981' }}
+        >
+          Mark Pin
+        </button>
 
         {/* Fairway Hit (FIR) & Green in Regulation (GIR) Toggles */}
         <div className="grid grid-cols-2 gap-2.5 text-xs">
@@ -2106,6 +2202,21 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         </div>
         <span className="text-[11px] font-semibold underline" style={{ color: 'var(--accent-emerald)' }}>Preview HUD</span>
       </button>
+      <PinScoutToast />
+      <PinFinishSheet
+        floating
+        open={pinSheetOpen}
+        pinPlaceMode={pinPlaceMode}
+        startWithMethods={pinSheetMode === 'mark'}
+        holeScore={currentStat}
+        onHoleScore={updateHoleStat}
+        canAdvance={false}
+        onAdvance={() => openPinSheet(false)}
+        onClose={() => openPinSheet(false)}
+        onCommitPin={commitTodayPin}
+        onBeginFlagDrag={beginFlagDrag}
+        onLockFlag={lockFlagDraft}
+      />
     </div>
   );
 }

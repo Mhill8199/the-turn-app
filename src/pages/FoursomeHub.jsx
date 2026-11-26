@@ -3,6 +3,21 @@ import { Send, Share2, Check, Shirt, Trophy, Receipt, Award, Cloud, UserPlus, Cr
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { COURSE_PRESETS } from '../lib/weatherPhysics';
+import { pinScoutTier, usePinScout } from '../utils/pinScout';
+
+function finiteStat(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function isCurrentPlayer(player, user, profile) {
+  if (!player) return false;
+  if (player.id === '1' || player.name === 'You') return true;
+  if (user?.id && player.userId && player.userId === user.id) return true;
+  const label = profile?.display_name || profile?.full_name || user?.user_metadata?.display_name || '';
+  if (label && player.name === label) return true;
+  return false;
+}
 
 function computeLiveRoundStats() {
   try {
@@ -72,7 +87,8 @@ function computeLiveRoundStats() {
 }
 
 export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAuth }) {
-  const { user, refreshProfile } = useAuth();
+  const { user, profile, refreshProfile } = useAuth();
+  const scout = usePinScout();
   const initialInviteId = new URLSearchParams(window.location.search).get('invite');
   const initialLockedFit = localStorage.getItem('the-turn-locked-fit') || 'Navy Polo - Stone Shorts - FJ White';
   const liveStats = computeLiveRoundStats();
@@ -216,6 +232,9 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
             hcp: Number(r.handicap) || 12,
             skins: r.skins || 0,
             score: r.score || 80,
+            pinsMarked: finiteStat(r.pins_marked),
+            scoutXp: finiteStat(r.scout_xp),
+            userId: r.user_id || r.member_id || r.profile_id || null,
           }))
         );
       }
@@ -387,6 +406,17 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
   const perPlayerTab = Math.round((Number(clubhouseTab) || 0) / activeCount);
   const lowHcp = activePlayers.reduce((min, p) => Math.min(min, Number(p.hcp) || 0), Infinity);
   const baselineHcp = Number.isFinite(lowHcp) ? lowHcp : 0;
+  const scoutFor = (player) => {
+    if (isCurrentPlayer(player, user, profile)) {
+      return { pins: scout.pinsMarked, xp: scout.scoutXp, tier: pinScoutTier(scout.pinsMarked) };
+    }
+    const pins = finiteStat(player?.pinsMarked);
+    const xp = finiteStat(player?.scoutXp);
+    return { pins, xp, tier: pinScoutTier(pins) };
+  };
+  const pinBoard = players
+    .map((player) => ({ player, row: scoutFor(player) }))
+    .sort((a, b) => b.row.pins - a.row.pins || b.row.xp - a.row.xp);
 
   const shareRecapCard = () => {
     const lines = activePlayers
@@ -440,8 +470,44 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
               <div className="font-mono font-bold tabular-nums">{liveStats.totalPutts}</div>
             </div>
           </div>
+          <div className="grid grid-cols-2 gap-1.5 text-center text-xs">
+            <div className="p-2 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
+              <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Pins Marked</div>
+              <div className="font-mono font-bold tabular-nums">{scout.pinsMarked}</div>
+            </div>
+            <div className="p-2 rounded-xl border" style={{ backgroundColor: 'var(--bg-elevated)', borderColor: 'var(--border-subtle)' }}>
+              <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>Pin Scout XP</div>
+              <div className="font-mono font-bold tabular-nums">{scout.scoutXp}</div>
+            </div>
+          </div>
         </div>
       )}
+
+      <div className="rounded-3xl border p-4 space-y-2" style={{ backgroundColor: '#0B0D0C', borderColor: 'rgba(16,185,129,0.45)', color: '#F4F5F1' }}>
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold" style={{ color: '#10B981' }}>Pin Scout</h3>
+          <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#10B981' }}>Daily pins</span>
+        </div>
+        <div className="grid grid-cols-[minmax(0,1.2fr)_3.2rem_5.6rem_3rem] gap-2 px-1 text-[10px] font-semibold uppercase tracking-wide text-white/55">
+          <span>Player</span>
+          <span className="text-right">Pins</span>
+          <span className="text-right">Badge</span>
+          <span className="text-right">XP</span>
+        </div>
+        {pinBoard.map(({ player, row }) => (
+          <div
+            key={player.id}
+            className="grid min-h-[44px] grid-cols-[minmax(0,1.2fr)_3.2rem_5.6rem_3rem] items-center gap-2 rounded-xl border border-white/10 px-2"
+          >
+            <span className="truncate text-sm font-semibold">{player.name}</span>
+            <span className="text-right text-sm font-bold tabular-nums">{row.pins}</span>
+            <span className="text-right text-[10px] font-semibold uppercase leading-tight" style={{ color: row.tier.unlocked ? '#10B981' : 'rgba(255,255,255,0.55)' }}>
+              {row.tier.unlocked ? row.tier.label : '—'}
+            </span>
+            <span className="text-right text-sm font-bold tabular-nums">{row.xp}</span>
+          </div>
+        ))}
+      </div>
 
       {/* Foursome Crew Pass (4-Seat Manager & Buddy Redemption) */}
       <div className="rounded-3xl p-4 border space-y-3" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--accent-gold)' }}>
@@ -671,6 +737,7 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
         {players.map((p) => {
           const playingStrokes = Math.max(0, (Number(p.hcp) || 0) - baselineHcp);
           const netScore = p.score - playingStrokes;
+          const pinRow = scoutFor(p);
           return (
             <div
               key={p.id}
@@ -698,6 +765,9 @@ export default function FoursomeHub({ isPro = false, onOpenPaywall, onRequireAut
                 <div className="text-[10px] font-mono mt-0.5 tabular-nums" style={{ color: 'var(--accent-emerald)' }}>
                   Gross {p.score} • Net {netScore} (-{playingStrokes} strokes)
                   {p.id === '1' && liveStats ? ` • GIR ${liveStats.girPct}% • FIR ${liveStats.firPct !== null ? `${liveStats.firPct}%` : 'N/A'} • ${liveStats.totalPutts} putts` : ''}
+                </div>
+                <div className="mt-0.5 text-[10px] font-mono tabular-nums" style={{ color: '#10B981' }}>
+                  Pins Marked {pinRow.pins} · {pinRow.tier.unlocked ? pinRow.tier.label : 'Pin Scout'} · {pinRow.xp} XP
                 </div>
               </div>
 

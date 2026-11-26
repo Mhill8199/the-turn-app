@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Trophy, Award, Crosshair, Flame } from 'lucide-react';
 import SocialScorecardGenerator from './SocialScorecardGenerator';
+import { pinScoutTier, usePinScout } from '../utils/pinScout';
 
 function RadialGauge({ label, valueText, percent, strokeColor = '#10B981', sublabel }) {
   const radius = 34;
@@ -56,6 +57,88 @@ const TROPHY_CARDS = [
     gradient: 'from-emerald-500 via-lime-300 to-cyan-300',
   },
 ];
+
+function PinScoutTrophyCard({ inspected, onInspect }) {
+  const stats = usePinScout();
+  const tier = pinScoutTier(stats.pinsMarked);
+  const unlocked = tier.unlocked;
+  const silver = tier.foil === 'silver';
+  const [tilt, setTilt] = useState({ rx: 0, ry: 0, px: 50, py: 40 });
+  const progress = Math.max(0, Math.min(100, (stats.pinsMarked / 18) * 100));
+  const foil = !unlocked
+    ? 'rgba(255,255,255,0.16)'
+    : silver
+      ? 'linear-gradient(115deg, #8E939A 0%, #F8F9FA 35%, #C5C9CE 55%, #9AA0A6 100%)'
+      : 'linear-gradient(115deg, #8A6A1A 0%, #D4AF37 32%, #F8E7B0 50%, #D4AF37 70%, #8A6A1A 100%)';
+  const badgeColor = !unlocked ? '#9CA3AF' : silver ? '#E8EAED' : '#D4AF37';
+
+  const onMove = (event) => {
+    if (!unlocked) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const px = ((event.clientX - rect.left) / Math.max(rect.width, 1)) * 100;
+    const py = ((event.clientY - rect.top) / Math.max(rect.height, 1)) * 100;
+    setTilt({
+      rx: ((50 - py) / 50) * 9,
+      ry: ((px - 50) / 50) * 11,
+      px,
+      py,
+    });
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={onInspect}
+      onPointerMove={onMove}
+      onPointerLeave={() => setTilt({ rx: 0, ry: 0, px: 50, py: 40 })}
+      className="w-full min-h-[44px] text-left"
+      style={{ perspective: '900px' }}
+    >
+      <div
+        className="rounded-3xl p-[2px] transition-transform duration-150"
+        style={{
+          background: foil,
+          transform: `rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg) scale(${inspected ? 1.02 : 1})`,
+          boxShadow: inspected ? '0 18px 40px rgba(0,0,0,0.35)' : undefined,
+        }}
+      >
+        <div className="relative flex items-center justify-between overflow-hidden rounded-[14px] p-4" style={{ backgroundColor: '#0B0D0C' }}>
+          {unlocked && (
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-0"
+              style={{
+                background: `linear-gradient(115deg, transparent 30%, rgba(255,255,255,0.38) 48%, transparent 62%), radial-gradient(circle at ${tilt.px}% ${tilt.py}%, rgba(255,255,255,0.35), transparent 46%)`,
+                mixBlendMode: 'screen',
+              }}
+            />
+          )}
+          <div className="relative min-w-0 flex-1">
+            <span className="rounded bg-white/10 px-2 py-0.5 text-[9px] font-mono font-black uppercase tracking-widest" style={{ color: badgeColor }}>
+              {unlocked ? tier.label : 'Locked'}
+            </span>
+            <div className="mt-1.5 text-base font-black text-white">Pin Scout</div>
+            <div className="text-xs text-zinc-400">
+              {unlocked ? 'Daily pins logged' : 'Mark 1 daily pin to unlock'}
+            </div>
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full" style={{ backgroundColor: '#1C211E' }}>
+              <div className="h-full rounded-full" style={{ width: `${progress}%`, backgroundColor: '#10B981' }} />
+            </div>
+            <div className="mt-1 flex justify-between text-[10px] tabular-nums text-zinc-400">
+              <span>{stats.pinsMarked} / 18 pins</span>
+              <span>{stats.scoutXp} XP</span>
+            </div>
+          </div>
+          <Award
+            size={32}
+            className={`relative shrink-0 transition-transform duration-500 ${inspected ? 'rotate-12' : ''}`}
+            style={{ color: unlocked ? badgeColor : '#71717A' }}
+          />
+        </div>
+      </div>
+    </button>
+  );
+}
 
 export default function PostRoundAnalyticsAndTrophies({
   strokesGainedTotal = '+2.4',
@@ -138,6 +221,10 @@ export default function PostRoundAnalyticsAndTrophies({
         </div>
 
         <div className="space-y-3">
+          <PinScoutTrophyCard
+            inspected={activeTrophyId === 'pin-scout'}
+            onInspect={() => triggerHapticAndFlip('pin-scout')}
+          />
           {TROPHY_CARDS.map((card) => {
             const inspected = activeTrophyId === card.id;
             return (

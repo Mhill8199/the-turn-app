@@ -3,6 +3,7 @@ import { COURSE_PRESETS } from '../lib/weatherPhysics';
 import { supabase } from '../lib/supabase';
 import { closestActiveClub } from '../utils/bagClubs';
 import { formatDistance as formatYardsDistance, useUnits } from '../utils/distanceUnits';
+import { snapOntoGreen } from '../utils/pinPlacements';
 
 /** ESRI World Imagery. Request this z/y/x order; never request z above 19. */
 const TILE_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
@@ -424,6 +425,38 @@ function frameHoleView(lie, green, width, height) {
   return { center, zoom: clampZoom(chosen), bearing };
 }
 
+function frameGreenClose(center, ring, width, height) {
+  const safe = validPoint(center) || DOCUMENTED_DEFAULT;
+  const points = Array.isArray(ring) ? ring.map((point) => validPoint(point)).filter(Boolean) : [];
+  if (points.length >= 3) {
+    const fit = fitView(points, width, height);
+    return { center: fit.center, zoom: clampZoom(Math.min(20, Math.max(fit.zoom, 19))) };
+  }
+  return { center: safe, zoom: 19 };
+}
+
+function greenRingForHole(features, holeNumber, greenCenter) {
+  const greens = (features || []).filter((feature) => feature?.kind === 'green' && feature.rings?.[0]?.length >= 3);
+  if (!greens.length) return null;
+  const number = Number(holeNumber);
+  const numbered = Number.isFinite(number) ? greens.filter((feature) => Number(feature.ref) === number) : [];
+  const pool = numbered.length ? numbered : greens;
+  const origin = validPoint(greenCenter);
+  if (!origin) return pool[0].rings[0];
+  let best = null;
+  let bestDistance = Infinity;
+  for (const feature of pool) {
+    const ring = feature.rings[0];
+    const distance = haversineMeters(ringCentroid(ring), origin);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = ring;
+    }
+  }
+  if (!numbered.length && bestDistance > 140) return null;
+  return best;
+}
+
 function pointInRing(point, ring) {
   if (!point || !Array.isArray(ring) || ring.length < 3) return false;
   let inside = false;
@@ -645,7 +678,7 @@ function ringPath(ring, project, close) {
   return path;
 }
 
-function ToPinReadout({ meters }) {
+function ToPinReadout({ meters, label = 'To pin' }) {
   const yards = metersToYards(meters);
   const metersLabel = `${Math.round(meters)} m`;
   const yardsLabel = `${Math.round(yards)} yds`;
@@ -671,7 +704,7 @@ function ToPinReadout({ meters }) {
   return (
     <div className="min-w-0">
       <div className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
-        To pin
+        {label}
       </div>
       <div className="tabular-nums text-lg font-semibold leading-tight">{primary}</div>
       <div className="tabular-nums text-[11px] leading-tight" style={{ color: 'var(--text-secondary)' }}>
@@ -698,6 +731,14 @@ export default function SatelliteHoleMap({
   markRequest = null,
   aimTarget = 'center',
   clubs = [],
+  livePin = null,
+  historyPins = [],
+  pinPlaceMode = false,
+  flagDraft = null,
+  onFlagDraft,
+  onGreenGeometry,
+  onRequestMarkPin,
+  onConfirmPin,
 }) {
   const { formatDistance } = useUnits();
   const holeMeta = hole || (holeNumber != null ? { number: holeNumber } : null);
@@ -748,6 +789,18 @@ export default function SatelliteHoleMap({
   const legClubRef = useRef('');
   const carryHintRef = useRef(carryYards);
   const gpsFrameRef = useRef('');
+  const flagDragRef = useRef(null);
+  const greenRingRef = useRef(null);
+  const pinPlaceModeRef = useRef(false);
+  const onFlagDraftRef = useRef(onFlagDraft);
+  const onGreenGeometryRef = useRef(onGreenGeometry);
+  const onRequestMarkPinRef = useRef(onRequestMarkPin);
+  const onConfirmPinRef = useRef(onConfirmPin);
+  onFlagDraftRef.current = onFlagDraft;
+  onGreenGeometryRef.current = onGreenGeometry;
+  onRequestMarkPinRef.current = onRequestMarkPin;
+  onConfirmPinRef.current = onConfirmPin;
+  pinPlaceModeRef.current = Boolean(pinPlaceMode);
   viewCenterRef.current = viewCenter;
   zoomRef.current = zoom;
   sizeRef.current = size;
@@ -782,6 +835,7 @@ export default function SatelliteHoleMap({
       : coursePoint
   );
   greenRef.current = greenCenter;
+  greenRingRef.current = greenRingForHole(features, hole?.number ?? holeNumber, greenCenter);
   teeRef.current = validPoint(origin) || coursePoint;
   if (validPoint(origin)) startRef.current = validPoint(origin);
 
@@ -905,7 +959,18 @@ export default function SatelliteHoleMap({
   }, [fill, hole?.number, holeNumber, courseName, lieKey]);
 
   useEffect(() => {
-    if (!fill || shots.length || !liveGps) return;
+    onGreenGeometryRef.current?.(greenRingRef.current);
+  }, [features, hole?.number, holeNumber, greenCenter?.lat, greenCenter?.lon]);
+
+  useEffect(() => {
+    if (!pinPlaceMode) return;
+    const fit = frameGreenClose(greenRef.current, greenRingRef.current, sizeRef.current.width, sizeRef.current.height);
+    setViewCenter(fit.center);
+    setZoom(fit.zoom);
+  }, [pinPlaceMode, hole?.number, holeNumber, courseName]);
+
+  useEffect(() => {
+    if (!fill || shots.length || !liveGps || pinPlaceModeRef.current) return;
     const token = `${holeNumber ?? ''}:${hole?.number ?? ''}:${courseName}`;
     if (gpsFrameRef.current === token) return;
     gpsFrameRef.current = token;
@@ -946,7 +1011,7 @@ export default function SatelliteHoleMap({
       if (width <= 0 || height <= 0) return;
 
       setSize((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
-      if (!fill) return;
+      if (!fill || pinPlaceModeRef.current) return;
 
       const prevSize = fittedSizeRef.current;
       const jumped =
@@ -1115,6 +1180,11 @@ export default function SatelliteHoleMap({
     if (drag.moved) return;
     const nextPin = eventToLatLon(event);
     if (!nextPin) return;
+    if (pinPlaceModeRef.current) {
+      const snapped = snapOntoGreen(nextPin, greenRef.current, greenRingRef.current);
+      if (snapped) onFlagDraftRef.current?.({ lat: snapped.lat, lng: snapped.lng, lon: snapped.lng });
+      return;
+    }
     if (!fill) {
       setPin(nextPin);
       const from = validPoint(gpsOrigin) || validPoint(origin) || viewCenterRef.current;
@@ -1184,6 +1254,34 @@ export default function SatelliteHoleMap({
     reticleDragRef.current = null;
   };
 
+  const onFlagPointerDown = (event) => {
+    event.stopPropagation();
+    if (!pinPlaceModeRef.current) return;
+    if (event.button != null && event.button !== 0) return;
+    flagDragRef.current = { id: event.pointerId };
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture can fail if the pointer already ended.
+    }
+  };
+
+  const onFlagPointerMove = (event) => {
+    const drag = flagDragRef.current;
+    if (!drag || drag.id !== event.pointerId || !pinPlaceModeRef.current) return;
+    const nextPin = eventToLatLon(event);
+    if (!nextPin) return;
+    const snapped = snapOntoGreen(nextPin, greenRef.current, greenRingRef.current);
+    if (!snapped) return;
+    onFlagDraftRef.current?.({ lat: snapped.lat, lng: snapped.lng, lon: snapped.lng });
+  };
+
+  const onFlagPointerUp = (event) => {
+    event.stopPropagation();
+    if (flagDragRef.current?.id !== event.pointerId) return;
+    flagDragRef.current = null;
+  };
+
   const useMyGps = () => {
     if (!navigator.geolocation) {
       setGpsNote('GPS unavailable — using map center');
@@ -1241,8 +1339,13 @@ export default function SatelliteHoleMap({
   const shotPath = trailScreens.length > 1
     ? trailScreens.map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' ')
     : '';
+  const livePoint = validPoint({ lat: livePin?.lat, lon: livePin?.lng ?? livePin?.lon });
+  const draftPoint = pinPlaceMode ? validPoint({ lat: flagDraft?.lat, lon: flagDraft?.lng ?? flagDraft?.lon }) : null;
+  const flagPoint = draftPoint || livePoint;
+  const secondLegTarget = flagPoint || greenCenter;
+  const secondUnrot = secondLegTarget ? view.project(secondLegTarget.lat, secondLegTarget.lon) : null;
   const leg1Yards = fill && lieForAim && reticle ? metersToYards(haversineMeters(lieForAim, reticle)) : null;
-  const leg2Yards = fill && reticle && greenCenter ? metersToYards(haversineMeters(reticle, greenCenter)) : null;
+  const leg2Yards = fill && reticle && secondLegTarget ? metersToYards(haversineMeters(reticle, secondLegTarget)) : null;
   const legClub = Number.isFinite(leg1Yards) ? closestActiveClub(clubs, leg1Yards) : null;
   const legClubName = legClub?.club_type || legClub?.name || '';
   legClubRef.current = legClubName || clubUsed || '';
@@ -1252,8 +1355,10 @@ export default function SatelliteHoleMap({
   const upright = (point) => (point ? rotateScreen(point.x, point.y, size.width, size.height, fill ? -heading : 0) : null);
   const lieUp = upright(lieUnrot);
   const reticleUp = upright(reticleUnrot);
-  const greenUp = upright(greenUnrot);
+  const secondUp = upright(secondUnrot);
+  const flagUp = flagPoint ? upright(view.project(flagPoint.lat, flagPoint.lon)) : null;
   const hazardUp = hazardPick ? upright(view.project(hazardPick.lat, hazardPick.lon)) : null;
+  const showPinHistory = pinPlaceMode || zoom >= 18;
 
   const frameGps = () => {
     const last = shotsRef.current[shotsRef.current.length - 1];
@@ -1370,6 +1475,14 @@ export default function SatelliteHoleMap({
               />
             ));
           })}
+          {showPinHistory && (historyPins || []).map((spot, index) => {
+            const lat = Number(spot?.lat);
+            const lon = Number(spot?.lng ?? spot?.lon);
+            if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+            if (flagPoint && haversineMeters({ lat, lon }, flagPoint) < 3) return null;
+            const screen = view.project(lat, lon);
+            return <circle key={spot?.id || `hist-${index}`} cx={screen.x} cy={screen.y} r="3" fill="#10B981" opacity="0.45" />;
+          })}
           {features.map((feature) => {
             if (feature.kind !== 'hole') return null;
             const ring = feature.rings[0];
@@ -1415,8 +1528,8 @@ export default function SatelliteHoleMap({
           {fill && lieUnrot && reticleUnrot && (
             <line x1={lieUnrot.x} y1={lieUnrot.y} x2={reticleUnrot.x} y2={reticleUnrot.y} stroke="#10B981" strokeWidth="2.5" strokeLinecap="round" />
           )}
-          {fill && reticleUnrot && greenUnrot && (
-            <line x1={reticleUnrot.x} y1={reticleUnrot.y} x2={greenUnrot.x} y2={greenUnrot.y} stroke="#D4AF37" strokeWidth="2" strokeDasharray="7 5" strokeLinecap="round" />
+          {fill && reticleUnrot && secondUnrot && (
+            <line x1={reticleUnrot.x} y1={reticleUnrot.y} x2={secondUnrot.x} y2={secondUnrot.y} stroke="#D4AF37" strokeWidth="2" strokeDasharray="7 5" strokeLinecap="round" />
           )}
           {fill && shotPath && (
             <path d={shotPath} fill="none" stroke="#D4AF37" strokeWidth="2.6" strokeLinejoin="round" strokeLinecap="round" />
@@ -1454,13 +1567,28 @@ export default function SatelliteHoleMap({
             {legClubName ? <div className="truncate text-[10px] font-semibold leading-tight">{legClubName}</div> : null}
           </div>
         )}
-        {fill && reticleUp && greenUp && Number.isFinite(leg2Yards) && (
+        {fill && reticleUp && secondUp && Number.isFinite(leg2Yards) && (
           <div
             className="pointer-events-none absolute z-10 -translate-y-1/2 rounded-full border border-[#D4AF37]/40 bg-[#0B0D0C]/85 px-2 py-0.5 backdrop-blur-md"
-            style={{ left: (reticleUp.x + greenUp.x) / 2 + 16, top: (reticleUp.y + greenUp.y) / 2 }}
+            style={{ left: (reticleUp.x + secondUp.x) / 2 + 16, top: (reticleUp.y + secondUp.y) / 2 }}
           >
             <div className="tabular-nums text-[11px] font-bold leading-tight text-[#D4AF37]">{formatDistance(leg2Yards)}</div>
           </div>
+        )}
+        {flagUp && (
+          <button
+            type="button"
+            aria-label={pinPlaceMode ? 'Drag today’s flag' : 'Live pin'}
+            className={`absolute z-20 h-11 w-11 -translate-x-1/2 -translate-y-full ${pinPlaceMode ? '' : 'pointer-events-none'}`}
+            style={{ left: flagUp.x, top: flagUp.y }}
+            onPointerDown={onFlagPointerDown}
+            onPointerMove={onFlagPointerMove}
+            onPointerUp={onFlagPointerUp}
+            onPointerCancel={onFlagPointerUp}
+          >
+            <span className="absolute bottom-0 left-1/2 h-7 w-px -translate-x-1/2 bg-white" />
+            <span className="absolute left-1/2 top-1 h-3 w-4 bg-[#10B981]" style={{ clipPath: 'polygon(0 0, 100% 35%, 0 70%)' }} />
+          </button>
         )}
         {fill && reticleUp && (
           <button
@@ -1531,6 +1659,22 @@ export default function SatelliteHoleMap({
             GPS
           </button>
         )}
+        <button
+          type="button"
+          onClick={() => onRequestMarkPinRef.current?.()}
+          className="min-h-[44px] rounded-2xl border border-[#10B981]/40 bg-[#0B0D0C]/85 px-2.5 text-[11px] font-semibold text-[#10B981] backdrop-blur-md"
+        >
+          Mark Pin
+        </button>
+        {livePoint && typeof onConfirmPin === 'function' && (
+          <button
+            type="button"
+            onClick={() => onConfirmPinRef.current?.()}
+            className="min-h-[44px] rounded-full border border-[#10B981]/50 bg-[#0B0D0C]/85 px-2.5 text-[10px] font-semibold text-[#10B981] backdrop-blur-md"
+          >
+            Confirm Pin <span className="tabular-nums">· {Number(livePin?.confirmations) || 0}</span>
+          </button>
+        )}
         {fill && modeToggle}
         </div>
 
@@ -1543,13 +1687,18 @@ export default function SatelliteHoleMap({
 
       {!fill && <div className="flex shrink-0 items-center justify-between gap-3 px-3 py-2.5">
         <div className="min-w-0">
-          {pinMeters == null ? (
+          {livePoint && (
+            <div className="mb-1 inline-flex rounded-full border border-[#10B981]/50 bg-[#0B0D0C]/85 px-2.5 py-1 text-[9px] font-semibold tracking-wide text-[#10B981] backdrop-blur-md">
+              LIVE PIN • Verified Today
+            </div>
+          )}
+          {pinMeters == null && !livePoint ? (
             <div>
               <div className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>To pin</div>
               <div className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>Tap the map to drop a pin</div>
             </div>
           ) : (
-            <ToPinReadout meters={pinMeters} />
+            <ToPinReadout meters={pinMeters != null ? pinMeters : haversineMeters(measuredFrom, livePoint)} label={pin ? 'To pin' : 'Exact Pin'} />
           )}
           <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>
             {pinMeters == null ? 'Distance uses GPS or the map center' : originLabel}
