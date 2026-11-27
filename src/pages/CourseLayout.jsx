@@ -37,9 +37,11 @@ import {
   buildSkeletonHoles,
   loadOfflineCatalog,
   fetchCoursesNear,
-  searchCoursesByName,
   rememberGlobalCourses,
+  escapeOverpassRegex,
+  normalizeCourseName,
 } from '../utils/globalCourseCatalog';
+import { loadPlayableGeometry, placeHolePoint, savePlacedGeometry } from '../utils/courseGeometries';
 import SatelliteHoleMap from '../components/SatelliteHoleMap';
 import ActiveRoundFocus from '../components/ActiveRoundFocus';
 import { useUnits } from '../utils/distanceUnits';
@@ -138,6 +140,121 @@ function courseDistanceLabel(course, origin, formatDistance) {
   return formatDistance(meters / 0.9144);
 }
 
+function readPinnedCourse() {
+  try {
+    const raw = localStorage.getItem('the-turn-selected-course');
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (parsed?.id && parsed?.name) return parsed;
+  } catch {
+    // Ignore unreadable storage. The starter list still loads.
+  }
+  return null;
+}
+
+function courseFromNominatim(item) {
+  if (!item || typeof item !== 'object') return null;
+  const blob = `${item.display_name || ''} ${item.name || ''} ${item.type || ''} ${item.class || ''}`.toLowerCase();
+  if (!blob.includes('golf')) return null;
+  const address = item.address || {};
+  const name = item.name || String(item.display_name || '').split(',')[0].trim();
+  if (!name) return null;
+  const type = item.osm_type || 'way';
+  const osmId = item.osm_id != null ? `${type}:${item.osm_id}` : undefined;
+  const box = Array.isArray(item.boundingbox) ? item.boundingbox.map(Number) : [];
+  return {
+    id: osmId ? `osm-${type}-${item.osm_id}` : undefined,
+    osmId,
+    name,
+    city: address.city || address.town || address.village || address.hamlet || address.suburb || address.municipality || '',
+    state: address.state || '',
+    lat: item.lat,
+    lon: item.lon,
+    boundingBox: box.length === 4 && box.every(Number.isFinite)
+      ? { south: box[0], north: box[1], west: box[2], east: box[3] }
+      : undefined,
+    source: 'nominatim',
+  };
+}
+
+function courseFromOverpass(element) {
+  const tags = element?.tags || {};
+  const name = tags.name || tags['name:en'];
+  if (!name) return null;
+  const type = element.type || 'way';
+  const osmId = element.id != null ? `${type}:${element.id}` : undefined;
+  const bounds = element.bounds;
+  return {
+    id: osmId ? `osm-${type}-${element.id}` : undefined,
+    osmId,
+    name,
+    city: tags['addr:city'] || tags['addr:town'] || tags['addr:suburb'] || '',
+    state: tags['addr:state'] || '',
+    lat: element.center?.lat ?? element.lat,
+    lon: element.center?.lon ?? element.lon,
+    holeCount: tags.holes,
+    par: tags.par,
+    boundingBox: bounds ? {
+      south: Number(bounds.minlat),
+      north: Number(bounds.maxlat),
+      west: Number(bounds.minlon),
+      east: Number(bounds.maxlon),
+    } : undefined,
+    source: 'overpass',
+  };
+}
+
+async function searchWorldwide(query, signal) {
+  const trimmed = String(query || '').trim();
+  if (!trimmed) return [];
+  const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=15&q=${encodeURIComponent(`${trimmed} golf course`)}`;
+  const escaped = escapeOverpassRegex(trimmed);
+  const overpassQuery = `[out:json][timeout:15];(way["leisure"="golf_course"]["name"~"${escaped}",i];relation["leisure"="golf_course"]["name"~"${escaped}",i];node["leisure"="golf_course"]["name"~"${escaped}",i];);out center bb tags;`;
+  const headers = { Accept: 'application/json' };
+  const [nominatim, overpass] = await Promise.allSettled([
+    fetch(nominatimUrl, { method: 'GET', signal, headers }).then((response) => {
+      if (!response.ok) throw new Error(`Nominatim ${response.status}`);
+      return response.json();
+    }),
+    fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      signal,
+      headers: { ...headers, 'Content-Type': 'text/plain;charset=UTF-8' },
+      body: overpassQuery,
+    }).then((response) => {
+      if (!response.ok) throw new Error(`Overpass ${response.status}`);
+      return response.json();
+    }),
+  ]);
+  if (signal?.aborted) {
+    const error = new Error('Aborted');
+    error.name = 'AbortError';
+    throw error;
+  }
+  const found = [];
+  if (nominatim.status === 'fulfilled' && Array.isArray(nominatim.value)) {
+    nominatim.value.forEach((item) => {
+      const course = courseFromNominatim(item);
+      if (course) found.push(course);
+    });
+  }
+  if (overpass.status === 'fulfilled') {
+    (overpass.value?.elements || []).forEach((element) => {
+      const course = courseFromOverpass(element);
+      if (course) found.push(course);
+    });
+  }
+  if (!found.length && nominatim.status === 'rejected' && overpass.status === 'rejected') {
+    const error = nominatim.reason || overpass.reason;
+    if (error?.name === 'AbortError') throw error;
+  }
+  return dedupeCourses(found);
+}
+
+function scoreToParLabel(rel, logged) {
+  if (!logged || !Number.isFinite(rel) || rel === 0) return 'E';
+  return rel > 0 ? `+${rel}` : String(rel);
+}
+
 function rowsNotAlreadyShown(base, extra) {
   const shown = dedupeCourses(base);
   const shownIds = new Set(shown.map((course) => course.id));
@@ -200,6 +317,12 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   });
 
   const [courseId, setCourseId] = useState(() => localStorage.getItem('the-turn-home-course') || STARTER_COURSES[0].id);
+  const [pinnedCourse, setPinnedCourse] = useState(() => {
+    const saved = readPinnedCourse();
+    const home = typeof localStorage !== 'undefined' ? localStorage.getItem('the-turn-home-course') : '';
+    if (saved && (!home || saved.id === home)) return saved;
+    return null;
+  });
   const [holeIdx, setHoleIdx] = useState(0);
   const [teeId, setTeeId] = useState('blue');
   const [activePinType, setActivePinType] = useState('target');
@@ -245,6 +368,12 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   const [holeNote, setHoleNote] = useState('');
 
   const [isRoundActive, setIsRoundActive] = useState(false);
+  const [courseGeometry, setCourseGeometry] = useState(null);
+  const [liveYards, setLiveYards] = useState(null);
+  const [shotLog, setShotLog] = useState({});
+  const [holeView, setHoleView] = useState('hole');
+  const [strategyOpen, setStrategyOpen] = useState(false);
+  const roundActionsRef = useRef(null);
   const [pinTarget, setPinTarget] = useState(null);
   const [trips, setTrips] = useState(() => loadTripQueue());
   const [tripDrawerOpen, setTripDrawerOpen] = useState(false);
@@ -356,11 +485,17 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
       searchAbortRef.current = controller;
       setSearchingCourses(true);
       setGpsStatus(`Searching courses for "${query}"...`);
-      searchCoursesByName(query, { signal: controller.signal })
+      const norm = normalizeCourseName(query);
+      const offlinePool = dedupeCourses([...customCourses, ...libraryCourses, ...STARTER_COURSES]);
+      const offline = norm
+        ? offlinePool.filter((course) => `${normalizeCourseName(course?.name)}${normalizeCourseName(course?.city)}`.includes(norm))
+        : [];
+      searchWorldwide(query, controller.signal)
         .then((found) => {
           if (controller.signal.aborted) return;
-          const list = Array.isArray(found) ? found : [];
+          const list = dedupeCourses([...(Array.isArray(found) ? found : []), ...offline]);
           setSearchResults(list);
+          if (found?.length) rememberGlobalCourses(found).catch(() => {});
           setGpsStatus(list.length ? `${list.length} courses match "${query}".` : `No indexed course for "${query}". Add a custom course.`);
         })
         .catch((err) => {
@@ -375,7 +510,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
       clearTimeout(timer);
       searchAbortRef.current?.abort();
     };
-  }, [courseSearch]);
+  }, [courseSearch, customCourses, libraryCourses]);
 
   useEffect(() => {
     if (!pickerOpen) return undefined;
@@ -437,14 +572,78 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
     [recentRows, nearRows, searchRows]
   );
   const activeCourse = useMemo(() => {
-    const found = allCourses.find((course) => course.id === courseId) || allCourses[0] || STARTER_COURSES[0];
-    return ensurePlayableHoles(found);
-  }, [allCourses, courseId]);
+    const listed = allCourses.find((course) => course.id === courseId);
+    if (pinnedCourse?.id && pinnedCourse.id === courseId) {
+      return ensurePlayableHoles({
+        ...(listed || {}),
+        ...pinnedCourse,
+        id: pinnedCourse.id,
+        name: pinnedCourse.name || listed?.name,
+        lat: pinnedCourse.lat ?? listed?.lat,
+        lon: pinnedCourse.lon ?? listed?.lon,
+        holes: pinnedCourse.holes?.length ? pinnedCourse.holes : listed?.holes,
+      });
+    }
+    if (listed) return ensurePlayableHoles(listed);
+    if (pinnedCourse) return ensurePlayableHoles(pinnedCourse);
+    return ensurePlayableHoles(allCourses[0] || STARTER_COURSES[0]);
+  }, [allCourses, courseId, pinnedCourse]);
 
   useEffect(() => {
     cacheSelectedCourse(activeCourse);
   }, [activeCourse]);
-  const baseHole = activeCourse.holes?.[holeIdx] || activeCourse.holes?.[0] || {
+
+  useEffect(() => {
+    const lat = Number(activeCourse?.lat);
+    const lon = Number(activeCourse?.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      setCourseGeometry(null);
+      return undefined;
+    }
+    const controller = new AbortController();
+    let cancelled = false;
+    loadPlayableGeometry(activeCourse, { signal: controller.signal })
+      .then((geo) => {
+        if (!cancelled) setCourseGeometry(geo);
+      })
+      .catch((error) => {
+        if (error?.name === 'AbortError' || cancelled) return;
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [activeCourse.id, activeCourse.lat, activeCourse.lon, activeCourse.holeCount, activeCourse.name]);
+
+  const layoutHoles = useMemo(() => {
+    const count = activeCourse.holeCount === 9 ? 9 : 18;
+    const skeleton = buildSkeletonHoles(count, activeCourse.par);
+    const cards = new Map((activeCourse.holes || []).map((hole) => [hole.number, hole]));
+    const mapped = new Map((courseGeometry?.holes || []).map((hole) => [hole.number, hole]));
+    const starter = activeCourse.source === 'starter';
+    return skeleton.map((base) => {
+      const card = cards.get(base.number);
+      const geo = mapped.get(base.number);
+      const handicap = card?.handicap ?? card?.hcp ?? card?.strokeIndex ?? geo?.handicap;
+      const useGeoScore = !starter && geo && !geo.generated;
+      return {
+        ...base,
+        ...(card || {}),
+        number: base.number,
+        par: useGeoScore && geo.par ? geo.par : (card?.par || geo?.par || base.par),
+        yards: useGeoScore && geo.yards ? geo.yards : (card?.yards || geo?.yards || base.yards),
+        bearingDeg: card?.bearingDeg || geo?.bearingDeg || base.bearingDeg,
+        handicap: Number.isFinite(Number(handicap)) && Number(handicap) > 0 ? Number(handicap) : undefined,
+        elevationDeltaFt: Number.isFinite(Number(geo?.elevationDeltaFt))
+          ? Number(geo.elevationDeltaFt)
+          : (Number.isFinite(Number(card?.elevationDeltaFt)) ? Number(card.elevationDeltaFt) : undefined),
+        lat: geo?.tee?.lat,
+        lon: geo?.tee?.lon,
+      };
+    });
+  }, [activeCourse, courseGeometry]);
+
+  const baseHole = layoutHoles[holeIdx] || layoutHoles[0] || {
     number: 1,
     par: 4,
     yards: 390,
@@ -504,13 +703,23 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   }, [activeCourse.lat, activeCourse.lon]);
 
   const selectCourse = useCallback((course) => {
-    if (!course?.id) return;
-    const playable = ensurePlayableHoles(course);
+    if (!course?.id && !course?.name) return;
+    const playable = ensurePlayableHoles({
+      ...course,
+      id: course.id || `course-${normalizeCourseName(course.name)}`,
+    });
+    setPinnedCourse(playable);
+    setCourseId(playable.id);
+    try {
+      localStorage.setItem('the-turn-home-course', playable.id);
+      localStorage.setItem('the-turn-selected-course', JSON.stringify(playable));
+    } catch {
+      // The in-memory pin still keeps this selection for the session.
+    }
     const isStarter = STARTER_COURSES.some((starter) => starter.id === playable.id);
     if (!isStarter) {
       setCustomCourses((prev) => [playable, ...prev.filter((item) => item.id !== playable.id)]);
     }
-    setCourseId(playable.id);
     setHoleIdx(0);
     setPickerOpen(false);
     rememberGlobalCourses([playable]).catch(() => {});
@@ -938,33 +1147,59 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   };
 
   if (isRoundActive) {
-    const targetYards = Number.isFinite(Number(pinTarget?.yards)) ? Number(pinTarget.yards) : activeHole.yards;
+    const shotKey = `${activeCourse.id}:${activeHole.number}`;
+    const loggedPutts = rawEntry && typeof rawEntry === 'object' && Number.isFinite(Number(rawEntry.putts))
+      ? Number(rawEntry.putts)
+      : 0;
+    const swingCount = (shotLog[shotKey] || []).length;
+    const livePin = Number.isFinite(Number(liveYards?.pinYards)) ? Number(liveYards.pinYards) : null;
     return (
       <ActiveRoundFocus
         holeNumber={activeHole.number}
+        holeCount={layoutHoles.length === 9 ? 9 : 18}
+        onSelectHole={(number) => {
+          const idx = layoutHoles.findIndex((hole) => hole.number === number);
+          if (idx >= 0) setHoleIdx(idx);
+        }}
         par={activeHole.par}
-        canPrev={holeIdx > 0}
-        canNext={holeIdx < (activeCourse.holes?.length || 1) - 1}
-        onPrev={() => setHoleIdx((idx) => Math.max(0, idx - 1))}
-        onNext={() => setHoleIdx((idx) => Math.min((activeCourse.holes?.length || 1) - 1, idx + 1))}
+        holeYards={activeHole.yards}
+        handicap={activeHole.handicap}
+        scoreLabel={scoreToParLabel(relPar, holesLogged)}
         onEndRound={() => {
           setPinTarget(null);
+          setHoleView('hole');
+          setStrategyOpen(false);
           setIsRoundActive(false);
         }}
-        centerYards={activeHole.yards}
-        frontYards={frontYards}
-        backYards={backYards}
-        pinYards={targetYards}
+        centerYards={Number.isFinite(Number(liveYards?.centerYards)) ? Number(liveYards.centerYards) : activeHole.yards}
+        frontYards={Number.isFinite(Number(liveYards?.frontYards)) ? Number(liveYards.frontYards) : frontYards}
+        backYards={Number.isFinite(Number(liveYards?.backYards)) ? Number(liveYards.backYards) : backYards}
+        pinYards={livePin}
         windSpeedMph={weather?.windSpeedMph}
         windDirDeg={weather?.windDirDeg}
-        holeBearingDeg={activeHole.bearingDeg}
+        holeBearingDeg={Number.isFinite(Number(liveYards?.bearingDeg)) ? Number(liveYards.bearingDeg) : activeHole.bearingDeg}
         clubs={clubs}
         suggestion={activeHole.note || aimAdvice}
         crewLabel={roundPartners}
+        shots={swingCount}
+        putts={loggedPutts}
+        onChangePutts={(delta) => {
+          const putts = Math.max(0, loggedPutts + delta);
+          updateHoleStat({ putts, strokes: Math.max(putts, swingCount + putts) });
+        }}
+        onMarkShot={() => roundActionsRef.current?.markShot?.()}
+        onSetPin={() => roundActionsRef.current?.setPin?.()}
+        elevationDeltaFt={activeHole.elevationDeltaFt}
+        onViewChange={setHoleView}
+        onStrategyChange={setStrategyOpen}
       >
         <SatelliteHoleMap
           fill
           isRoundActive
+          geometry={courseGeometry}
+          viewMode={holeView}
+          showDispersion={strategyOpen}
+          initialShots={shotLog[shotKey]}
           bearingDeg={activeHole.bearingDeg}
           courseName={activeCourse.name}
           center={{ lat: activeCourse.lat, lon: activeCourse.lon }}
@@ -975,10 +1210,26 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
             yards: activeHole.yards,
             lat: activeHole.lat,
             lon: activeHole.lon,
+            handicap: activeHole.handicap,
           }}
           clubs={clubs}
           origin={shotStartGps ? { lat: shotStartGps.lat, lon: shotStartGps.lon } : undefined}
           onPinChange={setPinTarget}
+          onYardage={setLiveYards}
+          onRegister={(api) => { roundActionsRef.current = api; }}
+          onShotsChange={(shots) => {
+            setShotLog((prev) => ({ ...prev, [shotKey]: shots }));
+            if (!shots?.length) return;
+            updateHoleStat({ strokes: shots.length + loggedPutts, putts: loggedPutts });
+          }}
+          onHolePoint={(number, which, point) => {
+            setCourseGeometry((prev) => {
+              if (!prev) return prev;
+              const next = placeHolePoint(prev, number, which, point);
+              savePlacedGeometry(next).catch(() => {});
+              return next;
+            });
+          }}
         />
       </ActiveRoundFocus>
     );
@@ -1175,7 +1426,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         )}
 
         <div className="flex gap-1.5 overflow-x-auto pb-1">
-          {(activeCourse.holes || []).map((h, idx) => (
+          {layoutHoles.map((h, idx) => (
             <button
               key={`${activeCourse.id}-${h.number}-${idx}`}
               onClick={() => setHoleIdx(idx)}
@@ -1619,6 +1870,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
 
           {/* OSM satellite hole map — imagery, schematic, and tap-to-pin. Existing hole diagram stays below. */}
           <SatelliteHoleMap
+            geometry={courseGeometry}
             courseName={activeCourse.name}
             center={{ lat: activeCourse.lat, lon: activeCourse.lon }}
             hole={{

@@ -20,7 +20,7 @@ const STORE_NAME = 'courses';
 const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
 const DOCUMENTED_DEFAULT = { lat: 33.8229, lon: -117.5214 };
 const DOS_LAGOS = { lat: 33.8229, lon: -117.5214 };
-const ROUND_FIT_PADDING = { top: 108, bottom: 280, left: 40, right: 64 };
+const HOLE_FIT_PADDING = { top: 115, bottom: 130, left: 24, right: 96 };
 const GOLF_TAGS = ['fairway', 'hole', 'green', 'bunker', 'water_hazard'];
 
 function mapboxToken() {
@@ -625,14 +625,40 @@ function approachFc(from, target, green) {
   };
 }
 
-function shotsFc(shots) {
-  if (!Array.isArray(shots) || shots.length < 2) return emptyFc();
+function shotsFc(shots, origin) {
+  const coords = [];
+  if (origin?.lat != null && origin?.lon != null) coords.push([origin.lon, origin.lat]);
+  for (const shot of shots || []) {
+    if (shot?.lat == null || shot?.lon == null) continue;
+    coords.push([shot.lon, shot.lat]);
+  }
+  if (coords.length < 2) return emptyFc();
   return {
     type: 'FeatureCollection',
     features: [{
       type: 'Feature',
       properties: { kind: 'trail' },
-      geometry: { type: 'LineString', coordinates: shots.map((shot) => [shot.lon, shot.lat]) },
+      geometry: { type: 'LineString', coordinates: coords },
+    }],
+  };
+}
+
+function dispersionFc(from, target) {
+  if (!from || !target) return emptyFc();
+  const bearing = bearingBetween(from, target);
+  const yards = metersToYards(haversineMeters(from, target));
+  const half = Math.max(8, yards * 0.08);
+  const left = destination(target, (bearing + 270) % 360, half);
+  const right = destination(target, (bearing + 90) % 360, half);
+  return {
+    type: 'FeatureCollection',
+    features: [{
+      type: 'Feature',
+      properties: { kind: 'dispersion' },
+      geometry: {
+        type: 'Polygon',
+        coordinates: [[[from.lon, from.lat], [left.lon, left.lat], [right.lon, right.lat], [from.lon, from.lat]]],
+      },
     }],
   };
 }
@@ -646,23 +672,24 @@ function setSourceData(map, id, data) {
  * Stable GeoJSON ids. A Year-2 Golf Intelligence or Golfbert feed only replaces
  * the FeatureCollections passed into these sources — not the layer stack or HUD.
  *
- * Sources: hole-fairways, hole-greens, hole-bunkers, hole-water, hole-centerlines, hole-approach, hole-shots
+ * Sources: hole-fairways, hole-greens, hole-bunkers, hole-water, hole-centerlines, hole-approach, hole-shots, hole-dispersion
  * Layers:  hole-fairways-fill, hole-fairways-line,
  *          hole-greens-fill, hole-greens-line,
  *          hole-bunkers-fill, hole-bunkers-line,
  *          hole-water-fill, hole-water-line,
  *          hole-centerlines,
  *          hole-approach-carry, hole-approach-green,
- *          hole-shots-line
+ *          hole-shots-line,
+ *          hole-dispersion-fill, hole-dispersion-line
  * hole-fairways is created even when Overpass returns no fairway polygons.
  */
 function ensureOverlayLayers(map) {
   if (!map?.getStyle?.() || map.getSource('hole-fairways')) return;
   const areas = [
-    ['hole-fairways', '#10B981', 0.18, '#10B981', 1.25],
-    ['hole-water', '#0284C7', 0.55, '#7DD3FC', 1.4],
-    ['hole-bunkers', '#E6D2A1', 0.92, '#A16207', 1.2],
-    ['hole-greens', '#10B981', 0.28, '#10B981', 2.4],
+    ['hole-fairways', '#10B981', 0.08, '#10B981', 1.5],
+    ['hole-water', '#38BDF8', 0.42, '#EF4444', 1.6],
+    ['hole-bunkers', '#D4AF37', 0.34, '#D4AF37', 1.6],
+    ['hole-greens', '#10B981', 0.14, '#10B981', 2],
   ];
   for (const [id] of areas) {
     map.addSource(id, { type: 'geojson', data: emptyFc() });
@@ -712,6 +739,54 @@ function ensureOverlayLayers(map) {
   });
 }
 
+function ensureDispersionLayer(map) {
+  if (!map?.getStyle?.() || map.getSource('hole-dispersion')) return;
+  map.addSource('hole-dispersion', { type: 'geojson', data: emptyFc() });
+  map.addLayer({
+    id: 'hole-dispersion-fill',
+    type: 'fill',
+    source: 'hole-dispersion',
+    paint: { 'fill-color': '#10B981', 'fill-opacity': 0.14 },
+  });
+  map.addLayer({
+    id: 'hole-dispersion-line',
+    type: 'line',
+    source: 'hole-dispersion',
+    paint: { 'line-color': '#10B981', 'line-width': 1.25, 'line-dasharray': [1.4, 1.2] },
+  });
+}
+
+function syncTourPaint(map) {
+  const paint = [
+    ['hole-fairways-fill', 'fill-color', '#10B981'],
+    ['hole-fairways-fill', 'fill-opacity', 0.08],
+    ['hole-fairways-line', 'line-color', '#10B981'],
+    ['hole-water-fill', 'fill-color', '#38BDF8'],
+    ['hole-water-fill', 'fill-opacity', 0.42],
+    ['hole-water-line', 'line-color', '#EF4444'],
+    ['hole-bunkers-fill', 'fill-color', '#D4AF37'],
+    ['hole-bunkers-fill', 'fill-opacity', 0.34],
+    ['hole-bunkers-line', 'line-color', '#D4AF37'],
+    ['hole-greens-fill', 'fill-color', '#10B981'],
+    ['hole-greens-fill', 'fill-opacity', 0.14],
+    ['hole-greens-line', 'line-color', '#10B981'],
+  ];
+  for (const [layer, prop, value] of paint) {
+    if (!map.getLayer(layer)) continue;
+    try { map.setPaintProperty(layer, prop, value); } catch { /* layer may still be mounting */ }
+  }
+}
+
+let gpsPulseStyle = false;
+function ensureGpsPulse() {
+  if (gpsPulseStyle || typeof document === 'undefined') return;
+  gpsPulseStyle = true;
+  const style = document.createElement('style');
+  style.id = 'turn-gps-pulse';
+  style.textContent = '@keyframes turn-gps-pulse{0%{box-shadow:0 0 0 0 rgba(16,185,129,.75)}70%{box-shadow:0 0 0 12px rgba(16,185,129,0)}100%{box-shadow:0 0 0 0 rgba(16,185,129,0)}}';
+  document.head.appendChild(style);
+}
+
 function closestClubName(clubs, yards) {
   const list = Array.isArray(clubs) ? clubs : [];
   let best = null;
@@ -758,6 +833,13 @@ export default function SatelliteHoleMap({
   onShotsChange,
   onLivePosition,
   onReticleChange,
+  onYardage,
+  onRegister,
+  onHolePoint,
+  geometry,
+  viewMode = 'hole',
+  showDispersion = false,
+  initialShots,
   bearingDeg: bearingProp,
   isRoundActive = false,
   fill = false,
@@ -789,6 +871,9 @@ export default function SatelliteHoleMap({
   const [livePin, setLivePin] = useState(null);
   const [target, setTarget] = useState(null);
   const [shots, setShots] = useState([]);
+  const [gpsDot, setGpsDot] = useState(null);
+  const [placeMode, setPlaceMode] = useState(null);
+  const [hazardReadout, setHazardReadout] = useState(null);
 
   const mapElRef = useRef(null);
   const mapRef = useRef(null);
@@ -804,6 +889,12 @@ export default function SatelliteHoleMap({
   const onShotsChangeRef = useRef(onShotsChange);
   const onReticleChangeRef = useRef(onReticleChange);
   const onLivePositionRef = useRef(onLivePosition);
+  const onYardageRef = useRef(onYardage);
+  const onRegisterRef = useRef(onRegister);
+  const onHolePointRef = useRef(onHolePoint);
+  const placeModeRef = useRef(null);
+  const holeNumRef = useRef(holeNum);
+  const holeFeaturesRef = useRef([]);
   const lieRef = useRef(null);
   const greenRef = useRef(null);
   const targetRef = useRef(null);
@@ -815,18 +906,41 @@ export default function SatelliteHoleMap({
   onShotsChangeRef.current = onShotsChange;
   onReticleChangeRef.current = onReticleChange;
   onLivePositionRef.current = onLivePosition;
+  onYardageRef.current = onYardage;
+  onRegisterRef.current = onRegister;
+  onHolePointRef.current = onHolePoint;
+  placeModeRef.current = placeMode;
+  holeNumRef.current = holeNum;
   shotsRef.current = shots;
   clubsRef.current = clubs;
   formatRef.current = formatDistance;
 
-  const playing = useMemo(
-    () => resolvePlaying(features, holeNum, anchor, cardBearing, cardYards),
-    [features, holeNum, anchor, cardBearing, cardYards]
-  );
-  const lie = useMemo(
-    () => validPoint(gpsOrigin) || validPoint(origin) || playing.tee || anchor,
-    [gpsOrigin, origin?.lat, origin?.lon, playing.tee, anchor]
-  );
+  const layoutHole = Array.isArray(geometry?.holes)
+    ? geometry.holes.find((item) => Number(item.number) === Number(holeNum))
+    : null;
+  const holeFeatures = useMemo(() => {
+    const list = Array.isArray(features) ? features : [];
+    if (!list.some((feature) => feature?.holeNumber != null)) return list;
+    const number = Number(holeNum);
+    return list.filter((feature) => Number(feature.holeNumber) === number);
+  }, [features, holeNum]);
+  holeFeaturesRef.current = holeFeatures;
+  const playing = useMemo(() => {
+    if (layoutHole?.tee && layoutHole?.green) {
+      return {
+        tee: layoutHole.tee,
+        green: layoutHole.green,
+        front: layoutHole.front,
+        back: layoutHole.back,
+        surveyed: !layoutHole.generated,
+      };
+    }
+    return resolvePlaying(holeFeatures, holeNum, anchor, cardBearing, cardYards);
+  }, [layoutHole, holeFeatures, holeNum, anchor, cardBearing, cardYards]);
+  const lie = useMemo(() => {
+    const last = shots.length ? shots[shots.length - 1] : null;
+    return validPoint(last) || validPoint(gpsDot) || validPoint(gpsOrigin) || validPoint(origin) || playing.tee || anchor;
+  }, [shots, gpsDot, gpsOrigin, origin?.lat, origin?.lon, playing.tee, anchor]);
   lieRef.current = lie;
   greenRef.current = playing.green;
   targetRef.current = target;
@@ -859,13 +973,16 @@ export default function SatelliteHoleMap({
     onPinChangeRef.current?.({ lat: point.lat, lon: point.lon, yards, meters });
   };
 
+  const shotSeedRef = useRef(initialShots);
+  shotSeedRef.current = initialShots;
   useEffect(() => {
     setPin(null);
     setLivePin(null);
     setTarget(null);
-    setShots([]);
+    setHazardReadout(null);
+    setPlaceMode(null);
+    setShots(Array.isArray(shotSeedRef.current) ? shotSeedRef.current : []);
     onPinChangeRef.current?.(null);
-    onShotsChangeRef.current?.([]);
   }, [holeKey]);
 
   useEffect(() => {
@@ -894,6 +1011,16 @@ export default function SatelliteHoleMap({
   const cellLon = Math.round(anchor.lon * 100) / 100;
 
   useEffect(() => {
+    if (geometry === undefined) return undefined;
+    const next = Array.isArray(geometry?.features) ? geometry.features : [];
+    setFeatures(next);
+    if (!geometry) setFeatureStatus('Loading course features…');
+    else setFeatureStatus(geometry.generated ? 'Playable hole corridors' : `${next.length} course features`);
+    return undefined;
+  }, [geometry]);
+
+  useEffect(() => {
+    if (geometry !== undefined) return undefined;
     let cancelled = false;
     const controller = new AbortController();
     const key = courseCacheKey(courseName, cellLat, cellLon);
@@ -972,7 +1099,7 @@ export default function SatelliteHoleMap({
       cancelled = true;
       controller.abort();
     };
-  }, [cellLat, cellLon, courseName, online]);
+  }, [cellLat, cellLon, courseName, online, geometry]);
 
   useLayoutEffect(() => {
     const el = mapElRef.current;
@@ -1037,6 +1164,8 @@ export default function SatelliteHoleMap({
       map.on('load', () => {
         if (cancelled) return;
         ensureOverlayLayers(map);
+        ensureDispersionLayer(map);
+        syncTourPaint(map);
         applyBasemapMode(map, modeRef.current === 'schematic', bgRestoreRef.current);
         safeResize(map);
         requestAnimationFrame(() => {
@@ -1053,7 +1182,43 @@ export default function SatelliteHoleMap({
       });
       map.on('click', (event) => {
         if (cancelled) return;
-        commitPinRef.current({ lat: event.lngLat.lat, lon: event.lngLat.lng });
+        const point = { lat: event.lngLat.lat, lon: event.lngLat.lng };
+        if (placeModeRef.current) {
+          onHolePointRef.current?.(holeNumRef.current, placeModeRef.current, point);
+          placeModeRef.current = null;
+          setPlaceMode(null);
+          return;
+        }
+        let hits = [];
+        try {
+          const layers = ['hole-bunkers-fill', 'hole-water-fill'].filter((id) => map.getLayer(id));
+          if (layers.length) hits = map.queryRenderedFeatures(event.point, { layers }) || [];
+        } catch {
+          hits = [];
+        }
+        if (hits.length) {
+          const featureId = hits[0]?.properties?.id;
+          const feature = (holeFeaturesRef.current || []).find((item) => item.id === featureId);
+          const ring = feature?.rings?.[0];
+          const from = lieRef.current;
+          const kind = String(hits[0]?.layer?.id || '').includes('bunker') ? 'bunker' : 'water';
+          if (ring && from) {
+            let carry = Infinity;
+            let clear = 0;
+            for (const spot of ring) {
+              const yards = metersToYards(haversineMeters(from, spot));
+              if (yards < carry) carry = yards;
+              if (yards > clear) clear = yards;
+            }
+            setHazardReadout({
+              kind,
+              carry: Number.isFinite(carry) ? carry : null,
+              clear: Number.isFinite(clear) ? clear : null,
+            });
+            return;
+          }
+        }
+        commitPinRef.current(point);
       });
       map.on('error', (event) => {
         if (cancelled) return;
@@ -1076,7 +1241,7 @@ export default function SatelliteHoleMap({
     const root = mapElRef.current;
     if (!root) return;
     root.querySelectorAll('.maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right').forEach((el) => {
-      el.style.bottom = fullscreen ? '18rem' : '0px';
+      el.style.bottom = fullscreen ? '5.5rem' : '0px';
     });
     root.querySelectorAll('.maplibregl-ctrl-attrib').forEach((el) => {
       el.style.fontSize = '10px';
@@ -1089,58 +1254,84 @@ export default function SatelliteHoleMap({
     const map = mapRef.current;
     if (!mapReady || !map) return;
     ensureOverlayLayers(map);
-    setSourceData(map, 'hole-fairways', polygonsFor(features, 'fairway'));
-    setSourceData(map, 'hole-greens', polygonsFor(features, 'green'));
-    setSourceData(map, 'hole-bunkers', polygonsFor(features, 'bunker'));
-    setSourceData(map, 'hole-water', polygonsFor(features, 'water'));
-    setSourceData(map, 'hole-centerlines', linesFor(features, 'hole'));
+    ensureDispersionLayer(map);
+    syncTourPaint(map);
+    setSourceData(map, 'hole-fairways', polygonsFor(holeFeatures, 'fairway'));
+    setSourceData(map, 'hole-greens', polygonsFor(holeFeatures, 'green'));
+    setSourceData(map, 'hole-bunkers', polygonsFor(holeFeatures, 'bunker'));
+    setSourceData(map, 'hole-water', polygonsFor(holeFeatures, 'water'));
+    setSourceData(map, 'hole-centerlines', linesFor(holeFeatures, 'hole'));
     applyBasemapMode(map, mode === 'schematic', bgRestoreRef.current);
-  }, [mapReady, features, mode]);
+  }, [mapReady, holeFeatures, mode]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!mapReady || !map) return;
     ensureOverlayLayers(map);
+    ensureDispersionLayer(map);
     setSourceData(map, 'hole-approach', approachFc(lie, target, playing.green));
-    setSourceData(map, 'hole-shots', shotsFc(shots));
-  }, [mapReady, lie, target, playing.green, shots, lieKey, targetKey, greenKey, shotsKey]);
+    setSourceData(map, 'hole-shots', shotsFc(shots, playing.tee));
+    setSourceData(map, 'hole-dispersion', showDispersion ? dispersionFc(lie, target) : emptyFc());
+  }, [mapReady, lie, target, playing.green, playing.tee, shots, lieKey, targetKey, greenKey, shotsKey, showDispersion]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!mapReady || !map || !playing.tee || !playing.green) return;
     if (size.width < 40 || size.height < 40) return;
-    const separated = Boolean(playing.tee && playing.green && haversineMeters(playing.tee, playing.green) > 8);
-    const bearing = separated
-      ? bearingBetween(lie || playing.tee, playing.green)
-      : (Number.isFinite(cardBearing) ? cardBearing : 0);
-    const frameId = `${holeKey}|${teeKey}|${greenKey}|${fullscreen ? 'fill' : 'card'}`;
+    const bearing = bearingBetween(playing.tee, playing.green);
+    const featureIds = holeFeatures.map((feature) => feature.id).join('.');
+    const frameId = `${holeKey}|${viewMode}|${teeKey}|${greenKey}|${featureIds}|${fullscreen ? 'fill' : 'card'}`;
+    if (framedRef.current === frameId) return;
+    framedRef.current = frameId;
+    const points = [];
+    const push = (point) => {
+      if (Number.isFinite(point?.lat) && Number.isFinite(point?.lon)) points.push(point);
+    };
+    if (viewMode === 'green') {
+      push(playing.front);
+      push(playing.green);
+      push(playing.back);
+      holeFeatures.filter((feature) => feature.kind === 'green').forEach((feature) => {
+        feature.rings?.forEach((ring) => ring.forEach(push));
+      });
+    } else {
+      push(playing.tee);
+      push(playing.green);
+      push(playing.front);
+      push(playing.back);
+      holeFeatures.forEach((feature) => {
+        if (!['fairway', 'green', 'bunker', 'water', 'hole'].includes(feature.kind)) return;
+        feature.rings?.forEach((ring) => ring.forEach(push));
+      });
+    }
+    if (!points.length) return;
+    let west = Infinity;
+    let east = -Infinity;
+    let south = Infinity;
+    let north = -Infinity;
+    for (const point of points) {
+      west = Math.min(west, point.lon);
+      east = Math.max(east, point.lon);
+      south = Math.min(south, point.lat);
+      north = Math.max(north, point.lat);
+    }
+    if (east - west < 0.00035) {
+      west -= 0.00025;
+      east += 0.00025;
+    }
+    if (north - south < 0.00035) {
+      south -= 0.00025;
+      north += 0.00025;
+    }
+    const holeBounds = new maplibregl.LngLatBounds([west, south], [east, north]);
+    const padding = fullscreen ? HOLE_FIT_PADDING : { top: 36, bottom: 36, left: 16, right: 16 };
     safeResize(map);
-    if (framedRef.current !== frameId) {
-      framedRef.current = frameId;
-      aimRef.current = aimKey;
-      if (!separated) {
-        const center = isDosLagosCourse(courseName) ? DOS_LAGOS : (playing.green || anchor);
-        map.easeTo({ center: [center.lon, center.lat], zoom: 16, bearing, pitch: 0, duration: 700 });
-      } else {
-        const bounds = new maplibregl.LngLatBounds(
-          [playing.tee.lon, playing.tee.lat],
-          [playing.green.lon, playing.green.lat]
-        );
-        map.fitBounds(bounds, {
-          bearing,
-          pitch: 0,
-          maxZoom: 18,
-          duration: 700,
-          padding: fullscreen ? ROUND_FIT_PADDING : { top: 64, bottom: 56, left: 32, right: 52 },
-        });
-      }
-      return;
+    try {
+      map.fitBounds(holeBounds, { bearing, padding, duration: 600 });
+    } catch (error) {
+      console.warn(error?.message || 'fitBounds skipped');
     }
-    if (aimRef.current !== aimKey) {
-      aimRef.current = aimKey;
-      map.easeTo({ bearing, pitch: 0, duration: 350 });
-    }
-  }, [mapReady, holeKey, teeKey, greenKey, aimKey, fullscreen, size.width, size.height, lie, playing.tee, playing.green, playing.surveyed, cardBearing, courseName, anchor]);
+  }, [mapReady, holeKey, viewMode, teeKey, greenKey, holeFeatures, fullscreen, size.width, size.height, playing.tee, playing.green, playing.front, playing.back]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1151,18 +1342,40 @@ export default function SatelliteHoleMap({
       return marker;
     };
 
-    if (lie) {
+    if (playing.tee) {
       add(new maplibregl.Marker({
-        element: markerEl('width:12px;height:12px;border-radius:9999px;background:#10B981;border:2px solid #fff;pointer-events:none'),
+        element: markerEl('width:16px;height:16px;border-radius:9999px;background:#10B981;border:2px solid #fff;box-shadow:0 0 0 3px rgba(16,185,129,0.35);pointer-events:none'),
         anchor: 'center',
-      }).setLngLat([lie.lon, lie.lat]).addTo(map));
+      }).setLngLat([playing.tee.lon, playing.tee.lat]).addTo(map));
     }
-    if (playing.green) {
-      add(new maplibregl.Marker({
-        element: markerEl('width:10px;height:10px;border-radius:9999px;background:#10B981;border:2px solid #fff;pointer-events:none'),
-        anchor: 'center',
-      }).setLngLat([playing.green.lon, playing.green.lat]).addTo(map));
-    }
+    [
+      ['F', playing.front],
+      ['C', playing.green],
+      ['B', playing.back],
+    ].forEach(([label, point]) => {
+      if (!point) return;
+      const el = markerEl('min-width:18px;height:18px;padding:0 3px;border-radius:9999px;background:#0B0D0C;color:#10B981;border:1px solid #10B981;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;pointer-events:none');
+      el.textContent = label;
+      add(new maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat([point.lon, point.lat]).addTo(map));
+    });
+    holeFeatures.filter((feature) => feature.kind === 'water').slice(0, 4).forEach((feature) => {
+      const ring = feature.rings?.[0];
+      if (!ring?.length || !lie) return;
+      let lat = 0;
+      let lon = 0;
+      let carry = Infinity;
+      for (const spot of ring) {
+        lat += spot.lat;
+        lon += spot.lon;
+        const yards = metersToYards(haversineMeters(lie, spot));
+        if (yards < carry) carry = yards;
+      }
+      const badge = markerEl('pointer-events:none;background:rgba(11,13,12,0.82);color:#38BDF8;border:1px solid #EF4444;border-radius:9999px;padding:1px 6px;font-size:10px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap');
+      badge.textContent = Number.isFinite(carry) ? formatDistance(carry) : '—';
+      add(new maplibregl.Marker({ element: badge, anchor: 'center' })
+        .setLngLat([lon / ring.length, lat / ring.length])
+        .addTo(map));
+    });
     if (target && lie && playing.green) {
       const label = markerEl('pointer-events:none;background:rgba(11,13,12,0.82);color:#10B981;border:1px solid rgba(255,255,255,0.18);border-radius:9999px;padding:2px 8px;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap');
       label.textContent = legLabel(metersToYards(haversineMeters(lie, target)), clubs, formatDistance);
@@ -1240,7 +1453,52 @@ export default function SatelliteHoleMap({
       clubMarkerRef.current = null;
       markers.forEach((marker) => marker.remove());
     };
-  }, [mapReady, targetKey, pinKey, shotsKey, lieKey, greenKey, distanceUnit, clubsKey, clubs, formatDistance, lie, pin, playing.green, shots, target]);
+  }, [mapReady, targetKey, pinKey, shotsKey, lieKey, greenKey, distanceUnit, clubsKey, clubs, formatDistance, lie, pin, playing.tee, playing.green, playing.front, playing.back, shots, target, holeFeatures]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!mapReady || !map || !gpsDot) return undefined;
+    ensureGpsPulse();
+    const marker = new maplibregl.Marker({
+      element: markerEl('width:12px;height:12px;border-radius:9999px;background:#38BDF8;border:2px solid #10B981;animation:turn-gps-pulse 1.6s infinite;pointer-events:none'),
+      anchor: 'center',
+    }).setLngLat([gpsDot.lon, gpsDot.lat]).addTo(map);
+    return () => marker.remove();
+  }, [mapReady, gpsDot]);
+
+  useEffect(() => {
+    if (!fullscreen || !navigator.geolocation) return undefined;
+    const watch = navigator.geolocation.watchPosition(
+      (pos) => {
+        const next = validPoint({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+        if (!next) return;
+        setGpsDot(next);
+        onLivePositionRef.current?.(next);
+      },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 2000, timeout: 12000 }
+    );
+    return () => navigator.geolocation.clearWatch(watch);
+  }, [fullscreen]);
+
+  useEffect(() => {
+    onYardageRef.current?.({
+      frontYards: Number.isFinite(frontYards) ? frontYards : null,
+      centerYards: Number.isFinite(centerYards) ? centerYards : null,
+      backYards: Number.isFinite(backYards) ? backYards : null,
+      pinYards: Number.isFinite(pinYards) ? pinYards : null,
+      bearingDeg: playing.tee && playing.green ? bearingBetween(playing.tee, playing.green) : null,
+    });
+  }, [frontYards, centerYards, backYards, pinYards, teeKey, greenKey, playing.tee, playing.green]);
+
+  const markShotRef = useRef(null);
+  const markPinRef = useRef(null);
+  useEffect(() => {
+    onRegisterRef.current?.({
+      markShot: () => markShotRef.current?.(),
+      setPin: () => markPinRef.current?.(),
+    });
+  }, [holeKey, mapReady]);
 
   const wantsLive = typeof onLivePosition === 'function';
   useEffect(() => {
@@ -1292,11 +1550,15 @@ export default function SatelliteHoleMap({
     }];
     setShots(next);
     onShotsChangeRef.current?.(next);
+    const green = greenRef.current;
+    if (green) setTarget(interpolate(point, green, 0.42));
   };
+  markShotRef.current = markShot;
 
   const markPin = () => {
     commitPinRef.current(greenRef.current || lieRef.current);
   };
+  markPinRef.current = markPin;
 
   const zoomBy = (delta) => {
     const map = mapRef.current;
@@ -1307,8 +1569,8 @@ export default function SatelliteHoleMap({
   const holeLabel = holeNum != null
     ? `Hole ${holeNum}${hole?.par ? ` · Par ${hole.par}` : ''}`
     : 'Hole map';
-  const originLabel = validPoint(gpsOrigin) ? 'From GPS' : validPoint(origin) ? 'From lie' : 'From tee';
-  const controlBottom = fullscreen ? '18rem' : '2.25rem';
+  const originLabel = validPoint(gpsDot) ? 'From GPS' : validPoint(gpsOrigin) ? 'From GPS' : validPoint(origin) ? 'From lie' : 'From tee';
+  const controlBottom = '2.25rem';
 
   return (
     <section
@@ -1335,10 +1597,8 @@ export default function SatelliteHoleMap({
         />
 
       <div className="pointer-events-none absolute inset-0 z-20">
-        <div
-          className="pointer-events-none absolute left-1/2 flex -translate-x-1/2 gap-1.5"
-          style={{ top: fullscreen ? '4.75rem' : '0.5rem' }}
-        >
+        {!fullscreen && (
+        <div className="pointer-events-none absolute left-1/2 top-2 flex -translate-x-1/2 gap-1.5">
           {[
             ['Back', backYards, false],
             ['Center', centerYards, true],
@@ -1357,8 +1617,9 @@ export default function SatelliteHoleMap({
             </div>
           ))}
         </div>
+        )}
 
-        <div className="absolute right-2 flex flex-col gap-1.5" style={{ top: fullscreen ? '4.75rem' : '0.5rem' }}>
+        <div className={`absolute flex flex-col gap-1.5 ${fullscreen ? 'left-2 top-28' : 'right-2 top-2'}`}>
           <div className="pointer-events-auto flex overflow-hidden rounded-full border border-white/20 bg-[#0B0D0C]/75 backdrop-blur-md">
             <button
               type="button"
@@ -1386,6 +1647,39 @@ export default function SatelliteHoleMap({
           </div>
         </div>
 
+        {fullscreen && geometry?.generated ? (
+          <div className="pointer-events-auto absolute bottom-28 left-2 flex gap-1.5">
+            <button
+              type="button"
+              onClick={() => setPlaceMode((mode) => (mode === 'tee' ? null : 'tee'))}
+              className="min-h-[44px] rounded-2xl px-3 text-xs font-semibold backdrop-blur-md"
+              style={{ backgroundColor: placeMode === 'tee' ? '#10B981' : 'rgba(11,13,12,0.85)', color: placeMode === 'tee' ? '#0B0D0C' : '#fff' }}
+            >
+              Set tee
+            </button>
+            <button
+              type="button"
+              onClick={() => setPlaceMode((mode) => (mode === 'green' ? null : 'green'))}
+              className="min-h-[44px] rounded-2xl px-3 text-xs font-semibold backdrop-blur-md"
+              style={{ backgroundColor: placeMode === 'green' ? '#D4AF37' : 'rgba(11,13,12,0.85)', color: placeMode === 'green' ? '#0B0D0C' : '#fff' }}
+            >
+              Set green
+            </button>
+          </div>
+        ) : null}
+        {hazardReadout ? (
+          <div className="pointer-events-none absolute bottom-24 left-2 rounded-2xl border border-white/15 bg-[#0B0D0C]/85 px-3 py-2 text-white backdrop-blur-md">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-[#D4AF37]">
+              {hazardReadout.kind === 'bunker' ? 'Bunker' : 'Carry'}
+            </div>
+            <div className="tabular-nums text-sm font-semibold">
+              {hazardReadout.kind === 'bunker'
+                ? `${showDistance(hazardReadout.carry, formatDistance)} carry · ${showDistance(hazardReadout.clear, formatDistance)} clear`
+                : showDistance(hazardReadout.carry, formatDistance)}
+            </div>
+          </div>
+        ) : null}
+        {!fullscreen && (
         <div className="absolute left-2 flex max-w-[70%] flex-wrap gap-1.5" style={{ bottom: controlBottom }}>
           <button
             type="button"
@@ -1416,6 +1710,7 @@ export default function SatelliteHoleMap({
             <div className="tabular-nums text-sm font-bold leading-tight">{showDistance(pinYards, formatDistance)}</div>
           </div>
         </div>
+        )}
 
         {!mapReady && !mapError && (
           <div className="absolute left-3 top-1/2 text-xs font-semibold text-white/80">Loading satellite…</div>
