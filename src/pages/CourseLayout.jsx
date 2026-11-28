@@ -316,12 +316,15 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
     }
   });
 
-  const [courseId, setCourseId] = useState(() => localStorage.getItem('the-turn-home-course') || STARTER_COURSES[0].id);
-  const [pinnedCourse, setPinnedCourse] = useState(() => {
-    const saved = readPinnedCourse();
-    const home = typeof localStorage !== 'undefined' ? localStorage.getItem('the-turn-home-course') : '';
-    if (saved && (!home || saved.id === home)) return saved;
-    return null;
+  const [pinnedCourse, setPinnedCourse] = useState(() => readPinnedCourse());
+  const [courseId, setCourseId] = useState(() => {
+    const pinned = readPinnedCourse();
+    if (pinned?.id) return pinned.id;
+    try {
+      return localStorage.getItem('the-turn-home-course') || STARTER_COURSES[0].id;
+    } catch {
+      return STARTER_COURSES[0].id;
+    }
   });
   const [holeIdx, setHoleIdx] = useState(0);
   const [teeId, setTeeId] = useState('blue');
@@ -556,7 +559,9 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   }, [trips]);
 
   const recentRows = useMemo(
-    () => dedupeCourses([...customCourses, ...libraryCourses, ...STARTER_COURSES]),
+    () => dedupeCourses([...customCourses, ...libraryCourses]).filter(
+      (course) => course?.source !== 'starter' && !STARTER_COURSES.some((starter) => starter.id === course.id)
+    ),
     [customCourses, libraryCourses]
   );
   const nearRows = useMemo(
@@ -585,13 +590,15 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
       });
     }
     if (listed) return ensurePlayableHoles(listed);
-    if (pinnedCourse) return ensurePlayableHoles(pinnedCourse);
-    return ensurePlayableHoles(allCourses[0] || STARTER_COURSES[0]);
+    if (pinnedCourse?.id) return ensurePlayableHoles(pinnedCourse);
+    return ensurePlayableHoles(STARTER_COURSES.find((course) => course.id === courseId) || STARTER_COURSES[0]);
   }, [allCourses, courseId, pinnedCourse]);
 
   useEffect(() => {
+    if (!activeCourse?.id) return;
+    if (pinnedCourse?.id && activeCourse.id !== pinnedCourse.id) return;
     cacheSelectedCourse(activeCourse);
-  }, [activeCourse]);
+  }, [activeCourse, pinnedCourse]);
 
   useEffect(() => {
     const lat = Number(activeCourse?.lat);
@@ -710,11 +717,29 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
     });
     setPinnedCourse(playable);
     setCourseId(playable.id);
+    const savedCourse = {
+      id: playable.id,
+      osmId: playable.osmId,
+      name: playable.name,
+      city: playable.city || '',
+      state: playable.state || '',
+      lat: playable.lat,
+      lon: playable.lon,
+      holeCount: playable.holeCount,
+      par: playable.par,
+      elevationFt: playable.elevationFt,
+      source: playable.source,
+      holes: playable.holes,
+    };
     try {
       localStorage.setItem('the-turn-home-course', playable.id);
-      localStorage.setItem('the-turn-selected-course', JSON.stringify(playable));
     } catch {
       // The in-memory pin still keeps this selection for the session.
+    }
+    try {
+      localStorage.setItem('the-turn-selected-course', JSON.stringify(savedCourse));
+    } catch {
+      // Home id is enough to reopen this course when the full record is still in memory.
     }
     const isStarter = STARTER_COURSES.some((starter) => starter.id === playable.id);
     if (!isStarter) {
@@ -1196,6 +1221,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
         <SatelliteHoleMap
           fill
           isRoundActive
+          courseId={activeCourse.id}
           geometry={courseGeometry}
           viewMode={holeView}
           showDispersion={strategyOpen}
@@ -1370,9 +1396,10 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
               </button>
               <div className="max-h-80 overflow-y-auto">
                 {[
+                  ['Search Results', searchRows],
                   ['Recent & Saved', recentRows],
                   ['Near Your Location', nearRows],
-                  ['Search Results', searchRows],
+                  ['Offline starters', STARTER_COURSES],
                 ].map(([label, rows]) => (
                   <div key={label}>
                     <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-[#10B981]">{label}</div>
@@ -1382,7 +1409,9 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
                           ? (gpsLoading ? 'Looking up courses around you...' : 'Tap Near Me to load every course within about 30 miles.')
                           : label === 'Search Results'
                             ? (searchingCourses ? 'Searching public, private, resort, and municipal courses...' : 'Type at least two letters to search worldwide.')
-                            : 'Saved and starter courses stay available offline.'}
+                            : label === 'Offline starters'
+                              ? 'Dos Lagos, Yucaipa, Oak Valley, and Glen Ivy stay available offline.'
+                              : 'Courses you pick stay on this device.'}
                       </div>
                     ) : rows.map((course, idx) => (
                       <CourseResultButton
@@ -1870,6 +1899,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
 
           {/* OSM satellite hole map — imagery, schematic, and tap-to-pin. Existing hole diagram stays below. */}
           <SatelliteHoleMap
+            courseId={activeCourse.id}
             geometry={courseGeometry}
             courseName={activeCourse.name}
             center={{ lat: activeCourse.lat, lon: activeCourse.lon }}

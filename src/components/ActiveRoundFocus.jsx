@@ -151,7 +151,7 @@ export default function ActiveRoundFocus({
 
   return (
     <div className="fixed inset-0 z-40 h-[100dvh] w-screen bg-[#0B0D0C] text-white">
-      <div className="absolute inset-0 z-40">{children}</div>
+      <div className="fixed inset-0 z-30 h-[100dvh] w-screen">{children}</div>
 
       <header className="pointer-events-auto absolute inset-x-0 top-0 z-50 border-b border-white/10 bg-[#0B0D0C]/90 px-2 pb-1.5 pt-[max(0.35rem,env(safe-area-inset-top))] backdrop-blur-md">
         <div className="flex items-center gap-1.5">

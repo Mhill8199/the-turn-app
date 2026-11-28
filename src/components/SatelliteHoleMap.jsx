@@ -9,10 +9,10 @@ import { rewriteCachedTileRequest } from '../utils/tripQueue';
 /**
  * Basemap choice (never log the token):
  * - VITE_MAPBOX_TOKEN non-empty → Mapbox satellite-streets-v12 (mapbox://styles/mapbox/satellite-streets-v12).
- * - Token empty → USGS National Map imagery + OpenFreeMap liberty labels. No key.
+ * - Token empty → Esri World Imagery. No key. Map startup does not wait on Overpass.
  */
 const MAPBOX_STYLE = 'mapbox://styles/mapbox/satellite-streets-v12';
-const USGS_TILES = 'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}';
+const ESRI_TILES = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
 const LIBERTY_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
 
 const DB_NAME = 'the-turn-course-cache';
@@ -20,7 +20,7 @@ const STORE_NAME = 'courses';
 const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
 const DOCUMENTED_DEFAULT = { lat: 33.8229, lon: -117.5214 };
 const DOS_LAGOS = { lat: 33.8229, lon: -117.5214 };
-const HOLE_FIT_PADDING = { top: 115, bottom: 130, left: 24, right: 96 };
+const HOLE_FIT_PADDING = { top: 115, bottom: 130, left: 28, right: 96 };
 const GOLF_TAGS = ['fairway', 'hole', 'green', 'bunker', 'water_hazard'];
 
 function mapboxToken() {
@@ -69,22 +69,23 @@ function absUrl(value, base) {
   }
 }
 
-function usgsRasterStyle() {
+function esriImageryStyle() {
   return {
     version: 8,
-    name: 'usgs-national-map',
+    name: 'esri-world-imagery',
     sources: {
-      'usgs-imagery': {
+      'esri-imagery': {
         type: 'raster',
-        tiles: [USGS_TILES],
+        tiles: [ESRI_TILES],
         tileSize: 256,
-        maxzoom: 16,
-        attribution: 'USGS National Map',
+        minzoom: 0,
+        maxzoom: 19,
+        attribution: 'Esri, Maxar, Earthstar Geographics',
       },
     },
     layers: [
-      { id: 'usgs-basemap-color', type: 'background', paint: { 'background-color': '#0B0D0C' } },
-      { id: 'usgs-imagery', type: 'raster', source: 'usgs-imagery' },
+      { id: 'esri-basemap-color', type: 'background', paint: { 'background-color': '#0B0D0C' } },
+      { id: 'esri-imagery', type: 'raster', source: 'esri-imagery' },
     ],
   };
 }
@@ -106,12 +107,13 @@ async function loadUsgsLibertyStyle(signal) {
     }
     sources[id] = next;
   }
-  sources['usgs-imagery'] = {
+  sources['esri-imagery'] = {
     type: 'raster',
-    tiles: [USGS_TILES],
+    tiles: [ESRI_TILES],
     tileSize: 256,
-    maxzoom: 16,
-    attribution: 'USGS National Map',
+    minzoom: 0,
+    maxzoom: 19,
+    attribution: 'Esri, Maxar, Earthstar Geographics',
   };
   const labels = (Array.isArray(style.layers) ? style.layers : [])
     .filter((layer) => layer?.id && (layer.type === 'symbol' || layer.type === 'line'))
@@ -127,8 +129,8 @@ async function loadUsgsLibertyStyle(signal) {
     sprite: typeof style.sprite === 'string' ? absUrl(style.sprite, LIBERTY_STYLE) : style.sprite,
     sources,
     layers: [
-      { id: 'usgs-basemap-color', type: 'background', paint: { 'background-color': '#0B0D0C' } },
-      { id: 'usgs-imagery', type: 'raster', source: 'usgs-imagery' },
+      { id: 'esri-basemap-color', type: 'background', paint: { 'background-color': '#0B0D0C' } },
+      { id: 'esri-imagery', type: 'raster', source: 'esri-imagery' },
       ...labels,
     ],
   };
@@ -146,7 +148,7 @@ async function attachLibertyLabels(map, signal) {
       console.warn(error?.message || 'Label style skipped');
     }
     for (const [id, source] of Object.entries(style.sources || {})) {
-      if (id === 'usgs-imagery' || map.getSource(id)) continue;
+      if (id === 'esri-imagery' || map.getSource(id)) continue;
       try {
         map.addSource(id, source);
       } catch (error) {
@@ -154,7 +156,7 @@ async function attachLibertyLabels(map, signal) {
       }
     }
     for (const layer of style.layers || []) {
-      if (!layer?.id || layer.id === 'usgs-imagery' || layer.id === 'usgs-basemap-color' || layer.id === 'usgs-topo') continue;
+      if (!layer?.id || layer.id === 'esri-imagery' || layer.id === 'esri-basemap-color' || layer.id === 'usgs-topo') continue;
       if (map.getLayer(layer.id) || (layer.source && !map.getSource(layer.source))) continue;
       try {
         const before = map.getLayer('hole-fairways-fill') ? 'hole-fairways-fill' : undefined;
@@ -315,6 +317,32 @@ async function upsertRemoteGeometry(record) {
   }
 }
 
+/** Local points always win. A missing table or rejected write must not throw. */
+async function persistHoleEnds(courseKey, courseName, holeNumber, tee, green) {
+  const record = {
+    key: `${courseKey}:hole:${holeNumber}:ends`,
+    courseName: courseName || '',
+    cellLat: tee.lat,
+    cellLon: tee.lon,
+    features: [
+      { id: `placed-tee-${holeNumber}`, kind: 'tee', holeNumber, rings: [[tee]] },
+      { id: `placed-green-${holeNumber}`, kind: 'green', holeNumber, rings: [[green]] },
+    ],
+    placements: { [holeNumber]: { tee, green } },
+    fetchedAt: Date.now(),
+  };
+  try {
+    await writeCourseCache(record);
+  } catch {
+    // localStorage already holds the two points.
+  }
+  try {
+    await upsertRemoteGeometry(record);
+  } catch {
+    // Keep the saved tee and green on this device.
+  }
+}
+
 async function writeCourseCache(record) {
   const db = await openCacheDb();
   return new Promise((resolve, reject) => {
@@ -339,6 +367,12 @@ function kindFromTags(tags = {}) {
 
 function ringsFromElement(element) {
   const rings = [];
+  if (element?.type === 'node') {
+    const lat = Number(element.lat);
+    const lon = Number(element.lon);
+    if (Number.isFinite(lat) && Number.isFinite(lon)) rings.push([{ lat, lon }]);
+    return rings;
+  }
   const push = (geometry) => {
     if (!Array.isArray(geometry) || geometry.length < 2) return;
     const ring = [];
@@ -360,7 +394,7 @@ function parseOverpass(data) {
   const features = [];
   const elements = Array.isArray(data?.elements) ? data.elements : [];
   for (const element of elements) {
-    if (element?.type !== 'way' && element?.type !== 'relation') continue;
+    if (element?.type !== 'way' && element?.type !== 'relation' && element?.type !== 'node') continue;
     const kind = kindFromTags(element.tags || {});
     if (!kind) continue;
     const rings = ringsFromElement(element);
@@ -371,7 +405,7 @@ function parseOverpass(data) {
       ref: element.tags?.ref ?? null,
       rings,
     });
-    if (features.length >= 400) break;
+    if (features.length >= 800) break;
   }
   return features;
 }
@@ -383,7 +417,7 @@ function isDosLagosCourse(name) {
 function overpassAround(lat, lon, dosLagos) {
   const la = dosLagos ? '33.8229' : Number(lat).toFixed(5);
   const lo = dosLagos ? '-117.5214' : Number(lon).toFixed(5);
-  return `[out:json][timeout:25];(way["golf"~"hole|green|fairway|bunker|tee|water_hazard"](around:1200,${la},${lo}););out geom;`;
+  return `[out:json][timeout:25];(way["golf"~"hole|green|fairway|bunker|tee|water_hazard"](around:1200,${la},${lo});node["golf"~"tee|green|hole"](around:1200,${la},${lo}););out geom;`;
 }
 
 async function fetchGolfFeatures(lat, lon, dosLagos, signal) {
@@ -413,12 +447,18 @@ function metersToYards(meters) {
 }
 
 function bearingBetween(a, b) {
-  const φ1 = (a.lat * Math.PI) / 180;
-  const φ2 = (b.lat * Math.PI) / 180;
-  const Δλ = ((b.lon - a.lon) * Math.PI) / 180;
+  return computeTeeToGreenBearing([a.lon, a.lat], [b.lon, b.lat]);
+}
+
+function computeTeeToGreenBearing([lng1, lat1], [lng2, lat2]) {
+  const toRad = (d) => (d * Math.PI) / 180;
+  const toDeg = (r) => (r * 180) / Math.PI;
+  const φ1 = toRad(lat1);
+  const φ2 = toRad(lat2);
+  const Δλ = toRad(lng2 - lng1);
   const y = Math.sin(Δλ) * Math.cos(φ2);
   const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
-  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
 }
 
 function destination(point, bearingDeg, yards) {
@@ -464,45 +504,88 @@ function holeRef(feature) {
   return match ? Number(match[0]) : null;
 }
 
-function closestLine(lines, near) {
-  let best = lines[0];
-  let bestD = Infinity;
-  for (const feature of lines) {
-    const ring = feature.rings[0];
-    const mid = ring[Math.floor(ring.length / 2)];
-    const distance = near ? haversineMeters(mid, near) : 0;
-    if (distance < bestD) {
+function realFeatures(features) {
+  return (Array.isArray(features) ? features : []).filter((feature) => feature && !feature.generated);
+}
+
+function featurePoint(feature) {
+  const ring = longestRing(feature?.rings || []);
+  if (!ring?.length) return null;
+  if (ring.length === 1) return ring[0];
+  if (ring.length < 3) {
+    return {
+      lat: (ring[0].lat + ring[ring.length - 1].lat) / 2,
+      lon: (ring[0].lon + ring[ring.length - 1].lon) / 2,
+    };
+  }
+  return ringCentroid(ring);
+}
+
+function belongsToHole(feature, holeNum) {
+  const wanted = Number(holeNum);
+  if (!Number.isFinite(wanted)) return false;
+  if (Number(feature?.holeNumber) === wanted) return true;
+  return holeRef(feature) === wanted;
+}
+
+function foreignHole(feature, holeNum) {
+  const wanted = Number(holeNum);
+  if (!Number.isFinite(wanted)) return false;
+  const tagged = Number(feature?.holeNumber);
+  if (Number.isFinite(tagged) && tagged !== wanted) return true;
+  const ref = holeRef(feature);
+  return ref != null && ref !== wanted;
+}
+
+function nearestFeature(features, near, maxMeters) {
+  if (!near) return null;
+  let best = null;
+  let bestPoint = null;
+  let bestD = maxMeters;
+  for (const feature of features) {
+    const point = featurePoint(feature);
+    if (!point) continue;
+    const distance = haversineMeters(point, near);
+    if (distance <= bestD) {
       best = feature;
+      bestPoint = point;
       bestD = distance;
     }
   }
-  return best;
+  return best ? { feature: best, point: bestPoint, distance: bestD } : null;
 }
 
-function pickGreen(features, near) {
-  const greens = features.filter((feature) => feature?.kind === 'green' && feature.rings?.some((ring) => ring.length >= 3));
-  if (!greens.length) return null;
-  if (!near) return greens[0];
-  let best = greens[0];
-  let bestD = Infinity;
-  for (const feature of greens) {
-    const distance = haversineMeters(ringCentroid(longestRing(feature.rings)), near);
-    if (distance < bestD) {
-      best = feature;
-      bestD = distance;
-    }
-  }
-  return best;
+function holeLineFor(features, holeNum) {
+  const lines = features.filter((feature) => feature.kind === 'hole' && feature.rings?.[0]?.length >= 2 && !foreignHole(feature, holeNum));
+  const wanted = Number(holeNum);
+  const numbered = Number.isFinite(wanted) ? lines.filter((feature) => belongsToHole(feature, wanted)) : [];
+  const pool = numbered.length ? numbered : (lines.length === 1 ? lines : []);
+  if (!pool.length) return null;
+  return pool.reduce((best, feature) => (feature.rings[0].length > best.rings[0].length ? feature : best));
 }
 
-function orientTeeGreen(line, greenFeature) {
-  const ring = line.rings[0];
+function orientEnds(ring, greens) {
   const start = ring[0];
   const end = ring[ring.length - 1];
-  if (!greenFeature?.rings?.[0]?.length) return { tee: start, greenEnd: end };
-  const centroid = ringCentroid(longestRing(greenFeature.rings));
-  if (haversineMeters(start, centroid) + 5 < haversineMeters(end, centroid)) return { tee: end, greenEnd: start };
-  return { tee: start, greenEnd: end };
+  const greenAtEnd = nearestFeature(greens, end, 180);
+  const greenAtStart = nearestFeature(greens, start, 180);
+  const endDist = greenAtEnd?.distance ?? Infinity;
+  const startDist = greenAtStart?.distance ?? Infinity;
+  if (startDist + 5 < endDist) {
+    return { teeEnd: end, greenEnd: start, green: greenAtStart };
+  }
+  return { teeEnd: start, greenEnd: end, green: greenAtEnd || greenAtStart };
+}
+
+function nearChord(point, tee, green, maxMeters) {
+  if (!tee || !green || !point) return false;
+  const axis = bearingBetween(tee, green);
+  const length = haversineMeters(tee, green);
+  const along = alongTrackMeters(tee, axis, point);
+  if (along < -50 || along > length + 50) return false;
+  const delta = ((bearingBetween(tee, point) - axis + 540) % 360) - 180;
+  const cross = Math.abs(haversineMeters(tee, point) * Math.sin((delta * Math.PI) / 180));
+  return cross <= maxMeters;
 }
 
 function depthPoints(tee, center, rings) {
@@ -534,35 +617,136 @@ function depthPoints(tee, center, rings) {
   return { front, center: ringCentroid(pts), back };
 }
 
-function resolvePlaying(features, holeNum, anchor, cardBearing, cardYards) {
-  const lines = features.filter((feature) => feature?.kind === 'hole' && feature.rings?.[0]?.length >= 2);
-  const wanted = Number(holeNum);
-  const numbered = Number.isFinite(wanted) ? lines.filter((feature) => holeRef(feature) === wanted) : [];
-  const hasCard = Number.isFinite(cardBearing) && Number.isFinite(cardYards) && cardYards > 0 && anchor;
-  let line = null;
-  if (numbered.length) line = closestLine(numbered, anchor);
-  else if (!hasCard && lines.length) line = closestLine(lines, anchor);
-
-  let tee = null;
-  let greenEnd = null;
-  if (line) {
-    tee = line.rings[0][0];
-    greenEnd = line.rings[0][line.rings[0].length - 1];
-  } else if (hasCard) {
-    tee = anchor;
-    greenEnd = destination(anchor, cardBearing, cardYards);
-  }
-  const greenFeature = pickGreen(features, greenEnd || anchor);
-  if (line && greenFeature) {
-    const oriented = orientTeeGreen(line, greenFeature);
-    tee = oriented.tee;
-    greenEnd = oriented.greenEnd;
-  }
-  if (!tee) tee = anchor;
+function fromEnds(tee, green, greenFeature) {
   const rings = greenFeature?.rings?.length ? [longestRing(greenFeature.rings)] : [];
-  const green = rings[0]?.length >= 3 ? ringCentroid(rings[0]) : (greenEnd || tee);
-  const depth = depthPoints(tee, green, rings);
-  return { tee, green: depth.center, front: depth.front, back: depth.back, surveyed: Boolean(line) };
+  const center = rings[0]?.length >= 3 ? ringCentroid(rings[0]) : green;
+  const depth = depthPoints(tee, center, rings);
+  const bearing = tee && center
+    ? computeTeeToGreenBearing([tee.lon, tee.lat], [center.lon, center.lat])
+    : 0;
+  return {
+    tee: tee || null,
+    green: depth.center || center || null,
+    front: depth.front,
+    back: depth.back,
+    bearing: tee && center ? bearing : 0,
+    surveyed: Boolean(tee && center),
+    locked: false,
+    line: null,
+  };
+}
+
+function pairGreenTee(features, holeNum, anchor) {
+  const tees = features.filter((feature) => feature.kind === 'tee');
+  const greens = features.filter((feature) => feature.kind === 'green' && feature.rings?.some((ring) => ring.length >= 3));
+  const wanted = Number(holeNum);
+  const numberedGreens = Number.isFinite(wanted) ? greens.filter((feature) => belongsToHole(feature, wanted)) : [];
+  let green = numberedGreens[0] || null;
+  if (!green && greens.length === 1) green = greens[0];
+  if (!green && anchor) green = nearestFeature(greens, anchor, 2500)?.feature || null;
+  if (!green) return null;
+  const center = featurePoint(green);
+  const gNum = holeRef(green) ?? (belongsToHole(green, holeNum) ? wanted : null);
+  const preceding = tees.filter((tee) => {
+    const tNum = holeRef(tee);
+    if (Number.isFinite(wanted) && belongsToHole(tee, wanted)) return true;
+    if (gNum != null && tNum != null) return tNum <= gNum;
+    return tNum == null;
+  });
+  const teeHit = nearestFeature(preceding.length ? preceding : tees, center, 500);
+  return { tee: teeHit?.point || null, green: center, greenFeature: green };
+}
+
+function resolveHoleCamera(features, holeNum, layoutHole, placed) {
+  const placedTee = validPoint(placed?.tee);
+  const placedGreen = validPoint(placed?.green);
+  if (placedTee && placedGreen) {
+    return { ...fromEnds(placedTee, placedGreen, null), locked: true, surveyed: true };
+  }
+
+  const real = realFeatures(features).filter((feature) => !foreignHole(feature, holeNum));
+  const line = holeLineFor(real, holeNum);
+  if (line?.rings?.[0]?.length >= 2) {
+    const greens = real.filter((feature) => feature.kind === 'green');
+    const oriented = orientEnds(line.rings[0], greens);
+    const teeHit = nearestFeature(real.filter((feature) => feature.kind === 'tee'), oriented.teeEnd, 160);
+    const tee = teeHit?.point || oriented.teeEnd;
+    const green = oriented.green?.point || oriented.greenEnd;
+    return { ...fromEnds(tee, green, oriented.green?.feature), line, locked: false };
+  }
+
+  const paired = pairGreenTee(real, holeNum, validPoint(layoutHole?.tee) || validPoint(layoutHole?.green));
+  if (paired?.tee && paired?.green) {
+    return { ...fromEnds(paired.tee, paired.green, paired.greenFeature), locked: false };
+  }
+  if (paired?.green) {
+    const depth = depthPoints(null, paired.green, paired.greenFeature?.rings || []);
+    return {
+      tee: null,
+      green: depth.center || paired.green,
+      front: depth.front,
+      back: depth.back,
+      bearing: 0,
+      surveyed: false,
+      locked: false,
+      line: null,
+    };
+  }
+
+  const layoutTee = validPoint(layoutHole?.tee);
+  const layoutGreen = validPoint(layoutHole?.green);
+  if (layoutTee && layoutGreen && layoutHole?.generated !== true) {
+    return { ...fromEnds(layoutTee, layoutGreen, null), surveyed: true };
+  }
+
+  const depth = layoutTee && layoutGreen
+    ? depthPoints(layoutTee, layoutGreen, [])
+    : { front: layoutHole?.front || null, center: layoutGreen || layoutTee, back: layoutHole?.back || null };
+  return {
+    tee: layoutTee,
+    green: layoutGreen || depth.center || null,
+    front: layoutHole?.front || depth.front || null,
+    back: layoutHole?.back || depth.back || null,
+    bearing: 0,
+    surveyed: false,
+    locked: false,
+    line: null,
+  };
+}
+
+function framePoints(features, holeNum, tee, green) {
+  const points = [];
+  const push = (point) => {
+    if (Number.isFinite(point?.lat) && Number.isFinite(point?.lon)) points.push(point);
+  };
+  push(tee);
+  push(green);
+  const list = Array.isArray(features) ? features : [];
+  const many = list.filter((feature) => feature?.kind === 'hole' && !feature.generated).length > 1;
+  for (const feature of list) {
+    if (!feature || !['fairway', 'hole', 'green', 'bunker', 'water', 'tee'].includes(feature.kind)) continue;
+    if (foreignHole(feature, holeNum)) continue;
+    const rings = feature.rings || [];
+    if (many && tee && green && !belongsToHole(feature, holeNum)) {
+      const limit = feature.kind === 'water' ? 170 : 140;
+      const close = rings.some((ring) => ring.some((point) => nearChord(point, tee, green, limit)));
+      if (!close) continue;
+    }
+    rings.forEach((ring) => ring.forEach(push));
+  }
+  return points;
+}
+
+function readStoredEnds(courseId, holeNum) {
+  if (typeof localStorage === 'undefined' || holeNum == null || !courseId) return null;
+  try {
+    const raw = localStorage.getItem(`the-turn-tee-green:${courseId}:${holeNum}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return { tee: validPoint(parsed?.tee), green: validPoint(parsed?.green) };
+  } catch {
+    return null;
+  }
 }
 
 function emptyFc() {
@@ -821,6 +1005,7 @@ function markerEl(css) {
 }
 
 export default function SatelliteHoleMap({
+  courseId = '',
   courseName = '',
   center,
   hole,
@@ -847,10 +1032,9 @@ export default function SatelliteHoleMap({
   const { formatDistance, distanceUnit } = useUnits();
   const fullscreen = Boolean(fill || isRoundActive);
   const holeNum = hole?.number ?? holeNumber ?? null;
+  const frameCourseId = String(courseId || courseName || 'course');
   const propLat = validPoint(hole)?.lat ?? validPoint(center)?.lat ?? (Number.isFinite(Number(lat)) ? Number(lat) : null);
   const propLon = validPoint(hole)?.lon ?? validPoint(center)?.lon ?? (Number.isFinite(Number(lon)) ? Number(lon) : null);
-  const cardYards = Number(hole?.yards);
-  const cardBearing = Number.isFinite(Number(hole?.bearingDeg)) ? Number(hole.bearingDeg) : Number(bearingProp);
 
   const anchor = useMemo(() => {
     if (propLat != null && propLon != null) return { lat: propLat, lon: propLon };
@@ -874,13 +1058,20 @@ export default function SatelliteHoleMap({
   const [gpsDot, setGpsDot] = useState(null);
   const [placeMode, setPlaceMode] = useState(null);
   const [hazardReadout, setHazardReadout] = useState(null);
+  const [lockedEnds, setLockedEnds] = useState({});
 
   const mapElRef = useRef(null);
   const mapRef = useRef(null);
   const anchorRef = useRef(anchor);
   anchorRef.current = anchor;
-  const framedRef = useRef('');
+  const lastFramedHoleKeyRef = useRef('');
+  const framedVectorRef = useRef('');
   const aimRef = useRef('');
+  const saveEndsRef = useRef(() => {});
+  const frameCourseIdRef = useRef(frameCourseId);
+  const lockedEndsRef = useRef(lockedEnds);
+  frameCourseIdRef.current = frameCourseId;
+  lockedEndsRef.current = lockedEnds;
   const bgRestoreRef = useRef(new Map());
   const modeRef = useRef(mode);
   const clubMarkerRef = useRef(null);
@@ -911,6 +1102,22 @@ export default function SatelliteHoleMap({
   onHolePointRef.current = onHolePoint;
   placeModeRef.current = placeMode;
   holeNumRef.current = holeNum;
+  saveEndsRef.current = (which, point) => {
+    const number = holeNumRef.current;
+    const id = `${frameCourseIdRef.current}:${number ?? ''}`;
+    const prevEnds = lockedEndsRef.current[id] || readStoredEnds(frameCourseIdRef.current, number) || {};
+    const nextEnds = { ...prevEnds, [which]: point };
+    try {
+      localStorage.setItem(`the-turn-tee-green:${id}`, JSON.stringify(nextEnds));
+    } catch {
+      // The in-memory points still lock this hole.
+    }
+    setLockedEnds((prev) => ({ ...prev, [id]: nextEnds }));
+    if (!validPoint(nextEnds.tee) || !validPoint(nextEnds.green)) return;
+    const here = anchorRef.current;
+    const courseKey = here ? courseCacheKey(courseName, here.lat, here.lon) : frameCourseIdRef.current;
+    persistHoleEnds(courseKey, courseName, number, nextEnds.tee, nextEnds.green).catch(() => {});
+  };
   shotsRef.current = shots;
   clubsRef.current = clubs;
   formatRef.current = formatDistance;
@@ -925,18 +1132,24 @@ export default function SatelliteHoleMap({
     return list.filter((feature) => Number(feature.holeNumber) === number);
   }, [features, holeNum]);
   holeFeaturesRef.current = holeFeatures;
-  const playing = useMemo(() => {
-    if (layoutHole?.tee && layoutHole?.green) {
-      return {
-        tee: layoutHole.tee,
-        green: layoutHole.green,
-        front: layoutHole.front,
-        back: layoutHole.back,
-        surveyed: !layoutHole.generated,
-      };
-    }
-    return resolvePlaying(holeFeatures, holeNum, anchor, cardBearing, cardYards);
-  }, [layoutHole, holeFeatures, holeNum, anchor, cardBearing, cardYards]);
+  const placedEnds = useMemo(() => {
+    const id = `${frameCourseId}:${holeNum ?? ''}`;
+    const fromState = lockedEnds[id];
+    const fromGeo = geometry?.placements?.[holeNum] || geometry?.placements?.[String(holeNum)];
+    const fromStore = readStoredEnds(frameCourseId, holeNum);
+    return {
+      tee: validPoint(fromState?.tee) || validPoint(fromGeo?.tee) || validPoint(fromStore?.tee),
+      green: validPoint(fromState?.green) || validPoint(fromGeo?.green) || validPoint(fromStore?.green),
+    };
+  }, [lockedEnds, frameCourseId, holeNum, geometry]);
+  const playing = useMemo(
+    () => resolveHoleCamera(holeFeatures, holeNum, layoutHole, placedEnds),
+    [holeFeatures, holeNum, layoutHole, placedEnds]
+  );
+  const endKey = playing.tee && playing.green ? `${pointKey(playing.tee)}>${pointKey(playing.green)}` : '';
+  const cameraSig = playing.locked
+    ? `lock:${endKey}`
+    : (playing.surveyed && endKey ? `osm:${endKey}` : (endKey ? `ends:${endKey}` : ''));
   const lie = useMemo(() => {
     const last = shots.length ? shots[shots.length - 1] : null;
     return validPoint(last) || validPoint(gpsDot) || validPoint(gpsOrigin) || validPoint(origin) || playing.tee || anchor;
@@ -1124,8 +1337,11 @@ export default function SatelliteHoleMap({
   }, []);
 
   useEffect(() => {
-    safeResize(mapRef.current);
-  }, [holeKey, size.width, size.height, fullscreen, mapReady]);
+    const map = mapRef.current;
+    safeResize(map);
+    const frame = requestAnimationFrame(() => safeResize(map));
+    return () => cancelAnimationFrame(frame);
+  }, [holeNum, viewMode, fullscreen, mapReady, size.width, size.height]);
 
   useEffect(() => {
     const container = mapElRef.current;
@@ -1134,12 +1350,11 @@ export default function SatelliteHoleMap({
     let cancelled = false;
     const token = mapboxToken();
     const usingMapbox = token.length > 0;
-    const startup = new AbortController();
 
     const start = anchorRef.current || DOCUMENTED_DEFAULT;
     map = new maplibregl.Map({
         container: mapElRef.current,
-        style: usingMapbox ? MAPBOX_STYLE : usgsRasterStyle(),
+        style: usingMapbox ? MAPBOX_STYLE : esriImageryStyle(),
         center: [start.lon, start.lat],
         zoom: 16,
         bearing: 0,
@@ -1149,7 +1364,7 @@ export default function SatelliteHoleMap({
         minZoom: 12,
         maxZoom: 19,
         fadeDuration: 0,
-        attributionControl: { compact: false, customAttribution: usingMapbox ? '© Mapbox © OpenStreetMap' : 'USGS National Map · © OpenStreetMap / OpenFreeMap' },
+        attributionControl: { compact: false, customAttribution: usingMapbox ? '© Mapbox © OpenStreetMap' : 'Esri, Maxar, Earthstar Geographics' },
         transformRequest: (url) => rewriteCachedTileRequest(url).then((cached) => {
           if (cached) return cached;
           if (usingMapbox) return { url: rewriteMapboxUrl(url, token) };
@@ -1175,7 +1390,6 @@ export default function SatelliteHoleMap({
         setMapError('');
         setMapReady(true);
         setZoomLabel(String(Math.round(map.getZoom())));
-        if (!usingMapbox) attachLibertyLabels(map, startup.signal);
       });
       map.on('zoom', () => {
         if (!cancelled) setZoomLabel(String(Math.round(map.getZoom())));
@@ -1184,6 +1398,7 @@ export default function SatelliteHoleMap({
         if (cancelled) return;
         const point = { lat: event.lngLat.lat, lon: event.lngLat.lng };
         if (placeModeRef.current) {
+          saveEndsRef.current(placeModeRef.current, point);
           onHolePointRef.current?.(holeNumRef.current, placeModeRef.current, point);
           placeModeRef.current = null;
           setPlaceMode(null);
@@ -1221,16 +1436,19 @@ export default function SatelliteHoleMap({
         commitPinRef.current(point);
       });
       map.on('error', (event) => {
-        if (cancelled) return;
-        const raw = String(event?.error?.message || 'map tile warning');
-        const safe = raw.replace(/access_token=[^&\s]+/gi, 'access_token=redacted');
-        console.warn(safe);
-        if (/WebGL|Failed to initialize/i.test(raw)) setMapError(safe);
+        try {
+          if (cancelled) return;
+          const raw = String(event?.error?.message || 'map tile warning');
+          const safe = raw.replace(/access_token=[^&\s]+/gi, 'access_token=redacted');
+          console.warn(safe);
+          if (/WebGL|Failed to initialize/i.test(raw)) setMapError(safe);
+        } catch {
+          console.warn('map tile warning');
+        }
       });
 
     return () => {
       cancelled = true;
-      startup.abort();
       setMapReady(false);
       map?.remove();
       if (mapRef.current === map) mapRef.current = null;
@@ -1276,45 +1494,36 @@ export default function SatelliteHoleMap({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!mapReady || !map || !playing.tee || !playing.green) return;
+    if (!mapReady || !map) return;
     if (size.width < 40 || size.height < 40) return;
-    const bearing = bearingBetween(playing.tee, playing.green);
-    const featureIds = holeFeatures.map((feature) => feature.id).join('.');
-    const frameId = `${holeKey}|${viewMode}|${teeKey}|${greenKey}|${featureIds}|${fullscreen ? 'fill' : 'card'}`;
-    if (framedRef.current === frameId) return;
-    framedRef.current = frameId;
-    const points = [];
-    const push = (point) => {
-      if (Number.isFinite(point?.lat) && Number.isFinite(point?.lon)) points.push(point);
-    };
-    if (viewMode === 'green') {
-      push(playing.front);
-      push(playing.green);
-      push(playing.back);
-      holeFeatures.filter((feature) => feature.kind === 'green').forEach((feature) => {
-        feature.rings?.forEach((ring) => ring.forEach(push));
-      });
-    } else {
-      push(playing.tee);
-      push(playing.green);
-      push(playing.front);
-      push(playing.back);
-      holeFeatures.forEach((feature) => {
-        if (!['fairway', 'green', 'bunker', 'water', 'hole'].includes(feature.kind)) return;
-        feature.rings?.forEach((ring) => ring.forEach(push));
-      });
-    }
+    const frameKey = `${frameCourseId}:${holeNum ?? ''}`;
+    const framedKey = lastFramedHoleKeyRef.current;
+    const framedVec = framedVectorRef.current;
+    const holeChanged = framedKey !== frameKey;
+    const lockUpdated = cameraSig.startsWith('lock:') && framedVec !== cameraSig;
+    const vectorArrived = !holeChanged && !framedVec.startsWith('lock:') && Boolean(cameraSig) && framedVec !== cameraSig && (
+      framedVec === '' || (cameraSig.startsWith('osm:') && framedVec.startsWith('ends:'))
+    );
+    if (!holeChanged && !lockUpdated && !vectorArrived) return;
+
+    const framedHole = playing;
+    const points = framePoints(holeFeatures, holeNum, framedHole.tee, framedHole.green);
+    if (framedHole.front) points.push(framedHole.front);
+    if (framedHole.back) points.push(framedHole.back);
+    if (!points.length && anchorRef.current) points.push(anchorRef.current);
     if (!points.length) return;
     let west = Infinity;
     let east = -Infinity;
     let south = Infinity;
     let north = -Infinity;
     for (const point of points) {
+      if (!Number.isFinite(point?.lat) || !Number.isFinite(point?.lon)) continue;
       west = Math.min(west, point.lon);
       east = Math.max(east, point.lon);
       south = Math.min(south, point.lat);
       north = Math.max(north, point.lat);
     }
+    if (!Number.isFinite(west) || !Number.isFinite(south)) return;
     if (east - west < 0.00035) {
       west -= 0.00025;
       east += 0.00025;
@@ -1324,14 +1533,22 @@ export default function SatelliteHoleMap({
       north += 0.00025;
     }
     const holeBounds = new maplibregl.LngLatBounds([west, south], [east, north]);
-    const padding = fullscreen ? HOLE_FIT_PADDING : { top: 36, bottom: 36, left: 16, right: 16 };
+    const teeToGreenBearing = framedHole.surveyed && framedHole.tee && framedHole.green ? framedHole.bearing : 0;
     safeResize(map);
     try {
-      map.fitBounds(holeBounds, { bearing, padding, duration: 600 });
+      map.fitBounds(holeBounds, {
+        bearing: teeToGreenBearing,
+        pitch: 0,
+        padding: HOLE_FIT_PADDING,
+        duration: 650,
+        essential: true,
+      });
+      lastFramedHoleKeyRef.current = frameKey;
+      framedVectorRef.current = cameraSig;
     } catch (error) {
       console.warn(error?.message || 'fitBounds skipped');
     }
-  }, [mapReady, holeKey, viewMode, teeKey, greenKey, holeFeatures, fullscreen, size.width, size.height, playing.tee, playing.green, playing.front, playing.back]);
+  }, [mapReady, frameCourseId, holeNum, cameraSig, size.width, size.height]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1455,15 +1672,32 @@ export default function SatelliteHoleMap({
     };
   }, [mapReady, targetKey, pinKey, shotsKey, lieKey, greenKey, distanceUnit, clubsKey, clubs, formatDistance, lie, pin, playing.tee, playing.green, playing.front, playing.back, shots, target, holeFeatures]);
 
+  const gpsMarkerRef = useRef(null);
   useEffect(() => {
     const map = mapRef.current;
-    if (!mapReady || !map || !gpsDot) return undefined;
+    if (!mapReady || !map) return undefined;
     ensureGpsPulse();
     const marker = new maplibregl.Marker({
       element: markerEl('width:12px;height:12px;border-radius:9999px;background:#38BDF8;border:2px solid #10B981;animation:turn-gps-pulse 1.6s infinite;pointer-events:none'),
       anchor: 'center',
-    }).setLngLat([gpsDot.lon, gpsDot.lat]).addTo(map);
-    return () => marker.remove();
+    }).setLngLat([0, 0]).addTo(map);
+    marker.getElement().style.display = 'none';
+    gpsMarkerRef.current = marker;
+    return () => {
+      marker.remove();
+      if (gpsMarkerRef.current === marker) gpsMarkerRef.current = null;
+    };
+  }, [mapReady]);
+
+  useEffect(() => {
+    const marker = gpsMarkerRef.current;
+    if (!marker) return;
+    if (!gpsDot) {
+      marker.getElement().style.display = 'none';
+      return;
+    }
+    marker.getElement().style.display = '';
+    marker.setLngLat([gpsDot.lon, gpsDot.lat]);
   }, [mapReady, gpsDot]);
 
   useEffect(() => {
@@ -1487,7 +1721,7 @@ export default function SatelliteHoleMap({
       centerYards: Number.isFinite(centerYards) ? centerYards : null,
       backYards: Number.isFinite(backYards) ? backYards : null,
       pinYards: Number.isFinite(pinYards) ? pinYards : null,
-      bearingDeg: playing.tee && playing.green ? bearingBetween(playing.tee, playing.green) : null,
+      bearingDeg: playing.surveyed && playing.tee && playing.green ? playing.bearing : 0,
     });
   }, [frontYards, centerYards, backYards, pinYards, teeKey, greenKey, playing.tee, playing.green]);
 
@@ -1589,10 +1823,10 @@ export default function SatelliteHoleMap({
         </div>
       )}
 
-      <div className={fullscreen ? 'relative h-full w-full' : 'relative h-[320px] w-full'}>
+      <div className={fullscreen ? 'fixed inset-0 h-[100dvh] w-screen' : 'relative h-[320px] w-full'}>
         <div
           ref={mapElRef}
-          className="h-full w-full"
+          className={fullscreen ? 'fixed inset-0 h-[100dvh] w-screen' : 'h-full w-full'}
           style={{ backgroundColor: '#0B0D0C' }}
         />
 
@@ -1647,7 +1881,7 @@ export default function SatelliteHoleMap({
           </div>
         </div>
 
-        {fullscreen && geometry?.generated ? (
+        {fullscreen && !playing.locked && (!playing.surveyed || !playing.tee || !playing.green) ? (
           <div className="pointer-events-auto absolute bottom-28 left-2 flex gap-1.5">
             <button
               type="button"
