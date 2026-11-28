@@ -5,6 +5,7 @@ import { COURSE_PRESETS } from '../lib/weatherPhysics';
 import { supabase } from '../lib/supabase';
 import { useUnits } from '../utils/distanceUnits';
 import { rewriteCachedTileRequest } from '../utils/tripQueue';
+import { fetchGreenSlope } from '../utils/courseGeometryService';
 
 /**
  * Basemap choice (never log the token):
@@ -889,7 +890,7 @@ function ensureOverlayLayers(map) {
   if (!map?.getStyle?.() || map.getSource('hole-fairways')) return;
   const areas = [
     ['hole-fairways', '#10B981', 0.08, '#10B981', 1.5],
-    ['hole-water', '#38BDF8', 0.42, '#EF4444', 1.6],
+    ['hole-water', '#38BDF8', 0.42, '#38BDF8', 1.6],
     ['hole-bunkers', '#D4AF37', 0.34, '#D4AF37', 1.6],
     ['hole-greens', '#10B981', 0.14, '#10B981', 2],
   ];
@@ -965,7 +966,7 @@ function syncTourPaint(map) {
     ['hole-fairways-line', 'line-color', '#10B981'],
     ['hole-water-fill', 'fill-color', '#38BDF8'],
     ['hole-water-fill', 'fill-opacity', 0.42],
-    ['hole-water-line', 'line-color', '#EF4444'],
+    ['hole-water-line', 'line-color', '#38BDF8'],
     ['hole-bunkers-fill', 'fill-color', '#D4AF37'],
     ['hole-bunkers-fill', 'fill-opacity', 0.34],
     ['hole-bunkers-line', 'line-color', '#D4AF37'],
@@ -1077,6 +1078,7 @@ export default function SatelliteHoleMap({
   const [placeMode, setPlaceMode] = useState(null);
   const [hazardReadout, setHazardReadout] = useState(null);
   const [lockedEnds, setLockedEnds] = useState({});
+  const [slopeImageUrl, setSlopeImageUrl] = useState('');
 
   const mapElRef = useRef(null);
   const mapRef = useRef(null);
@@ -1332,6 +1334,28 @@ export default function SatelliteHoleMap({
     };
   }, [cellLat, cellLon, courseName, online, geometry]);
 
+  useEffect(() => {
+    if (viewMode !== 'green') {
+      setSlopeImageUrl('');
+      return undefined;
+    }
+    const publicId = geometry?.publicId;
+    const holeId = layoutHole?.holeId;
+    if (!publicId && (holeId == null || holeId === '')) return undefined;
+    let cancelled = false;
+    fetchGreenSlope({
+      publicId,
+      holeId,
+      holeNumber: holeNum,
+      imageSizeType: 'Portrait',
+    }).then((result) => {
+      if (cancelled) return;
+      const url = result?.imageUrl || result?.url || '';
+      if (typeof url === 'string' && /^https?:\/\//i.test(url)) setSlopeImageUrl(url);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [viewMode, geometry?.publicId, layoutHole?.holeId, holeNum]);
+
   useLayoutEffect(() => {
     const el = mapElRef.current;
     if (!el) return undefined;
@@ -1516,17 +1540,15 @@ export default function SatelliteHoleMap({
     if (!mapReady || !map) return;
     if (size.width < 40 || size.height < 40) return;
     const frameKey = `${frameCourseId}:${holeNum ?? ''}`;
-    const framedKey = lastFramedHoleKeyRef.current;
-    const framedVec = framedVectorRef.current;
-    const holeChanged = framedKey !== frameKey;
-    const lockUpdated = cameraSig.startsWith('lock:') && framedVec !== cameraSig;
-    const vectorArrived = !holeChanged && !framedVec.startsWith('lock:') && Boolean(cameraSig) && framedVec !== cameraSig && (
-      framedVec === '' || (cameraSig.startsWith('osm:') && framedVec.startsWith('ends:'))
-    );
-    if (!holeChanged && !lockUpdated && !vectorArrived) return;
-
     const framedHole = playing;
-    const points = framePoints(holeFeatures, holeNum, framedHole.tee, framedHole.green);
+    const tee = validPoint(framedHole.tee);
+    const green = validPoint(framedHole.green);
+    const mapped = Boolean(tee && green && framedHole.surveyed);
+    const quality = mapped ? 'mapped' : 'plain';
+    if (lastFramedHoleKeyRef.current === frameKey && (framedVectorRef.current === 'mapped' || framedVectorRef.current === quality)) {
+      return;
+    }
+    const points = framePoints(holeFeatures, holeNum, tee, green);
     if (framedHole.front) points.push(framedHole.front);
     if (framedHole.back) points.push(framedHole.back);
     if (!points.length && anchorRef.current) points.push(anchorRef.current);
@@ -1552,22 +1574,25 @@ export default function SatelliteHoleMap({
       north += 0.00025;
     }
     const holeBounds = new maplibregl.LngLatBounds([west, south], [east, north]);
-    const teeToGreenBearing = framedHole.surveyed && framedHole.tee && framedHole.green ? framedHole.bearing : 0;
+    const teeToGreenBearing = mapped
+      ? computeTeeToGreenBearing([tee.lon, tee.lat], [green.lon, green.lat])
+      : 0;
     safeResize(map);
     try {
       map.fitBounds(holeBounds, {
         bearing: teeToGreenBearing,
         pitch: 0,
-        padding: HOLE_FIT_PADDING,
-        duration: 650,
+        padding: fullscreen ? { top: 96, bottom: 128, left: 28, right: 96 } : HOLE_FIT_PADDING,
+        duration: 0,
+        maxZoom: map.getMaxZoom(),
         essential: true,
       });
       lastFramedHoleKeyRef.current = frameKey;
-      framedVectorRef.current = cameraSig;
+      framedVectorRef.current = quality;
     } catch (error) {
       console.warn(error?.message || 'fitBounds skipped');
     }
-  }, [mapReady, frameCourseId, holeNum, cameraSig, size.width, size.height]);
+  }, [mapReady, frameCourseId, holeNum, cameraSig, size.width, size.height, fullscreen]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1919,6 +1944,15 @@ export default function SatelliteHoleMap({
               Set green
             </button>
           </div>
+        ) : null}
+        {viewMode === 'green' && slopeImageUrl ? (
+          <img
+            src={slopeImageUrl}
+            alt=""
+            className="pointer-events-none absolute right-2 z-30 h-40 w-24 rounded-2xl border border-[#10B981]/60 object-cover"
+            style={{ bottom: fullscreen ? '7.5rem' : '4.5rem' }}
+            onError={() => setSlopeImageUrl('')}
+          />
         ) : null}
         {hazardReadout ? (
           <div className="pointer-events-none absolute bottom-24 left-2 rounded-2xl border border-white/15 bg-[#0B0D0C]/85 px-3 py-2 text-white backdrop-blur-md">

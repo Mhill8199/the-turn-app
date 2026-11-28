@@ -38,10 +38,10 @@ import {
   loadOfflineCatalog,
   fetchCoursesNear,
   rememberGlobalCourses,
-  escapeOverpassRegex,
   normalizeCourseName,
 } from '../utils/globalCourseCatalog';
 import { loadPlayableGeometry, placeHolePoint, savePlacedGeometry } from '../utils/courseGeometries';
+import { hydrateGolfCourse, searchGolfCourses } from '../utils/courseGeometryService';
 import SatelliteHoleMap from '../components/SatelliteHoleMap';
 import ActiveRoundFocus from '../components/ActiveRoundFocus';
 import { useUnits } from '../utils/distanceUnits';
@@ -61,6 +61,7 @@ import {
   formatTripLine,
   formatUpNext,
   formatPartners,
+  formatTeeTime,
   createTrip,
   prefetchTripCourse,
   upcomingDateISO,
@@ -151,105 +152,6 @@ function readPinnedCourse() {
   return null;
 }
 
-function courseFromNominatim(item) {
-  if (!item || typeof item !== 'object') return null;
-  const blob = `${item.display_name || ''} ${item.name || ''} ${item.type || ''} ${item.class || ''}`.toLowerCase();
-  if (!blob.includes('golf')) return null;
-  const address = item.address || {};
-  const name = item.name || String(item.display_name || '').split(',')[0].trim();
-  if (!name) return null;
-  const type = item.osm_type || 'way';
-  const osmId = item.osm_id != null ? `${type}:${item.osm_id}` : undefined;
-  const box = Array.isArray(item.boundingbox) ? item.boundingbox.map(Number) : [];
-  return {
-    id: osmId ? `osm-${type}-${item.osm_id}` : undefined,
-    osmId,
-    name,
-    city: address.city || address.town || address.village || address.hamlet || address.suburb || address.municipality || '',
-    state: address.state || '',
-    lat: item.lat,
-    lon: item.lon,
-    boundingBox: box.length === 4 && box.every(Number.isFinite)
-      ? { south: box[0], north: box[1], west: box[2], east: box[3] }
-      : undefined,
-    source: 'nominatim',
-  };
-}
-
-function courseFromOverpass(element) {
-  const tags = element?.tags || {};
-  const name = tags.name || tags['name:en'];
-  if (!name) return null;
-  const type = element.type || 'way';
-  const osmId = element.id != null ? `${type}:${element.id}` : undefined;
-  const bounds = element.bounds;
-  return {
-    id: osmId ? `osm-${type}-${element.id}` : undefined,
-    osmId,
-    name,
-    city: tags['addr:city'] || tags['addr:town'] || tags['addr:suburb'] || '',
-    state: tags['addr:state'] || '',
-    lat: element.center?.lat ?? element.lat,
-    lon: element.center?.lon ?? element.lon,
-    holeCount: tags.holes,
-    par: tags.par,
-    boundingBox: bounds ? {
-      south: Number(bounds.minlat),
-      north: Number(bounds.maxlat),
-      west: Number(bounds.minlon),
-      east: Number(bounds.maxlon),
-    } : undefined,
-    source: 'overpass',
-  };
-}
-
-async function searchWorldwide(query, signal) {
-  const trimmed = String(query || '').trim();
-  if (!trimmed) return [];
-  const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=15&q=${encodeURIComponent(`${trimmed} golf course`)}`;
-  const escaped = escapeOverpassRegex(trimmed);
-  const overpassQuery = `[out:json][timeout:15];(way["leisure"="golf_course"]["name"~"${escaped}",i];relation["leisure"="golf_course"]["name"~"${escaped}",i];node["leisure"="golf_course"]["name"~"${escaped}",i];);out center bb tags;`;
-  const headers = { Accept: 'application/json' };
-  const [nominatim, overpass] = await Promise.allSettled([
-    fetch(nominatimUrl, { method: 'GET', signal, headers }).then((response) => {
-      if (!response.ok) throw new Error(`Nominatim ${response.status}`);
-      return response.json();
-    }),
-    fetch('https://overpass-api.de/api/interpreter', {
-      method: 'POST',
-      signal,
-      headers: { ...headers, 'Content-Type': 'text/plain;charset=UTF-8' },
-      body: overpassQuery,
-    }).then((response) => {
-      if (!response.ok) throw new Error(`Overpass ${response.status}`);
-      return response.json();
-    }),
-  ]);
-  if (signal?.aborted) {
-    const error = new Error('Aborted');
-    error.name = 'AbortError';
-    throw error;
-  }
-  const found = [];
-  if (nominatim.status === 'fulfilled' && Array.isArray(nominatim.value)) {
-    nominatim.value.forEach((item) => {
-      const course = courseFromNominatim(item);
-      if (course) found.push(course);
-    });
-  }
-  if (overpass.status === 'fulfilled') {
-    (overpass.value?.elements || []).forEach((element) => {
-      const course = courseFromOverpass(element);
-      if (course) found.push(course);
-    });
-  }
-  if (!found.length && nominatim.status === 'rejected' && overpass.status === 'rejected') {
-    const error = nominatim.reason || overpass.reason;
-    if (error?.name === 'AbortError') throw error;
-  }
-  return dedupeCourses(found);
-}
-
 function scoreToParLabel(rel, logged) {
   if (!logged || !Number.isFinite(rel) || rel === 0) return 'E';
   return rel > 0 ? `+${rel}` : String(rel);
@@ -283,7 +185,7 @@ function CourseResultButton({ course, origin, formatDistance, onSelect }) {
   );
 }
 
-export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall, onOpenWearable, onActiveHole }) {
+export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall, onOpenWearable, onActiveHole, onOpenSocial, launchRequest, onLaunchConsumed }) {
   const { distanceUnit, formatDistance, formatSpeed } = useUnits();
   const { lang } = useLanguage();
   const { user } = useAuth();
@@ -377,6 +279,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   const [holeView, setHoleView] = useState('hole');
   const [strategyOpen, setStrategyOpen] = useState(false);
   const roundActionsRef = useRef(null);
+  const consumedLaunchRef = useRef('');
   const [pinTarget, setPinTarget] = useState(null);
   const [trips, setTrips] = useState(() => loadTripQueue());
   const [tripDrawerOpen, setTripDrawerOpen] = useState(false);
@@ -493,7 +396,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
       const offline = norm
         ? offlinePool.filter((course) => `${normalizeCourseName(course?.name)}${normalizeCourseName(course?.city)}`.includes(norm))
         : [];
-      searchWorldwide(query, controller.signal)
+      searchGolfCourses(query, { signal: controller.signal })
         .then((found) => {
           if (controller.signal.aborted) return;
           const list = dedupeCourses([...(Array.isArray(found) ? found : []), ...offline]);
@@ -591,7 +494,12 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
     }
     if (listed) return ensurePlayableHoles(listed);
     if (pinnedCourse?.id) return ensurePlayableHoles(pinnedCourse);
-    return ensurePlayableHoles(STARTER_COURSES.find((course) => course.id === courseId) || STARTER_COURSES[0]);
+    const starter = STARTER_COURSES.find((course) => course.id === courseId);
+    if (starter) return ensurePlayableHoles(starter);
+    if (courseId) {
+      return ensurePlayableHoles({ id: courseId, name: 'Saved course', source: 'saved' });
+    }
+    return ensurePlayableHoles(STARTER_COURSES[0]);
   }, [allCourses, courseId, pinnedCourse]);
 
   useEffect(() => {
@@ -603,24 +511,69 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
   useEffect(() => {
     const lat = Number(activeCourse?.lat);
     const lon = Number(activeCourse?.lon);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    const hasPoint = Number.isFinite(lat) && Number.isFinite(lon);
+    if (!activeCourse?.publicId && !hasPoint) {
       setCourseGeometry(null);
       return undefined;
     }
     const controller = new AbortController();
     let cancelled = false;
-    loadPlayableGeometry(activeCourse, { signal: controller.signal })
-      .then((geo) => {
-        if (!cancelled) setCourseGeometry(geo);
-      })
-      .catch((error) => {
-        if (error?.name === 'AbortError' || cancelled) return;
+    const apply = (geo) => {
+      if (!cancelled) setCourseGeometry(geo);
+    };
+    const loadOsm = () => {
+      if (!hasPoint) {
+        apply(null);
+        return Promise.resolve();
+      }
+      return loadPlayableGeometry(activeCourse, { signal: controller.signal }).then(apply);
+    };
+    const rememberPlace = (geo) => {
+      const lat = Number(geo?.lat);
+      const lon = Number(geo?.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+      setPinnedCourse((prev) => {
+        if (!prev || (prev.publicId !== geo.publicId && prev.id !== activeCourse.id)) return prev;
+        if (Number(prev.lat) === lat && Number(prev.lon) === lon && prev.publicId === geo.publicId) return prev;
+        const next = {
+          ...prev,
+          lat,
+          lon,
+          publicId: geo.publicId || prev.publicId,
+          name: geo.courseName || prev.name,
+        };
+        try {
+          localStorage.setItem('the-turn-selected-course', JSON.stringify(next));
+          localStorage.setItem('the-turn-home-course', next.id);
+        } catch {
+          // The in-memory pin still keeps this club for the session.
+        }
+        return next;
       });
+    };
+    const load = activeCourse?.publicId
+      ? hydrateGolfCourse(activeCourse, { signal: controller.signal })
+        .then((geo) => {
+          if (geo?.holes?.length) {
+            apply(geo);
+            rememberPlace(geo);
+            return null;
+          }
+          return loadOsm();
+        })
+        .catch((error) => {
+          if (error?.name === 'AbortError' || cancelled) return null;
+          return loadOsm();
+        })
+      : loadOsm();
+    Promise.resolve(load).catch((error) => {
+      if (error?.name === 'AbortError' || cancelled) return;
+    });
     return () => {
       cancelled = true;
       controller.abort();
     };
-  }, [activeCourse.id, activeCourse.lat, activeCourse.lon, activeCourse.holeCount, activeCourse.name]);
+  }, [activeCourse.id, activeCourse.publicId, activeCourse.lat, activeCourse.lon, activeCourse.holeCount, activeCourse.name]);
 
   const layoutHoles = useMemo(() => {
     const count = activeCourse.holeCount === 9 ? 9 : 18;
@@ -725,6 +678,7 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
       state: playable.state || '',
       lat: playable.lat,
       lon: playable.lon,
+      publicId: playable.publicId,
       holeCount: playable.holeCount,
       par: playable.par,
       elevationFt: playable.elevationFt,
@@ -1171,6 +1125,36 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
     commitTrips(trips.filter((trip) => trip.id !== id));
   };
 
+  useEffect(() => {
+    const token = launchRequest?.token;
+    if (!token || consumedLaunchRef.current === token) return;
+    consumedLaunchRef.current = token;
+    const name = String(launchRequest.courseName || '').trim();
+    if (name) {
+      const known = [...allCourses, ...libraryCourses, ...STARTER_COURSES].find(
+        (course) => String(course?.name || '').toLowerCase() === name.toLowerCase()
+      );
+      if (known) {
+        selectCourse(known);
+      } else {
+        selectCourse({
+          id: launchRequest.courseId || `lobby-${launchRequest.lobbyId || token}`,
+          name,
+          lat: launchRequest.lat,
+          lon: launchRequest.lon,
+          holes: Array.isArray(launchRequest.holes) ? launchRequest.holes : [],
+        });
+      }
+    }
+    const partnerLine = formatPartners(launchRequest.partners);
+    const teeLine = formatTeeTime(launchRequest.teeTime);
+    setRoundPartners([partnerLine, teeLine].filter(Boolean).join(' · '));
+    setPinTarget(null);
+    setTripDrawerOpen(false);
+    setIsRoundActive(true);
+    onLaunchConsumed?.();
+  }, [launchRequest, allCourses, libraryCourses, selectCourse, onLaunchConsumed]);
+
   if (isRoundActive) {
     const shotKey = `${activeCourse.id}:${activeHole.number}`;
     const loggedPutts = rawEntry && typeof rawEntry === 'object' && Number.isFinite(Number(rawEntry.putts))
@@ -1331,14 +1315,24 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
             Round Warm-Up
           </button>
         </div>
-        <button
-          type="button"
-          onClick={openTripDrawer}
-          className="w-full min-h-[44px] rounded-2xl text-sm font-semibold"
-          style={{ color: '#D4AF37', border: '1px solid #D4AF37', backgroundColor: 'transparent' }}
-        >
-          Plan Trip / Queue Round
-        </button>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={openTripDrawer}
+            className="min-h-[44px] rounded-3xl border px-3 text-sm font-semibold"
+            style={{ color: '#D4AF37', borderColor: '#D4AF37', backgroundColor: 'transparent' }}
+          >
+            Plan Trip / Queue Round
+          </button>
+          <button
+            type="button"
+            onClick={() => onOpenSocial?.()}
+            className="min-h-[44px] rounded-3xl border px-3 text-left text-sm font-semibold"
+            style={{ color: '#F8F7F4', borderColor: '#D4AF37', backgroundColor: '#0B0D0C' }}
+          >
+            Find Playing Partners / Match Foursome
+          </button>
+        </div>
         <div ref={pickerRef} className="relative space-y-2">
           <div className="flex items-center gap-1.5">
             <div className="relative flex-1">

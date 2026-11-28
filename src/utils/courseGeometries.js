@@ -651,13 +651,89 @@ async function readLegacyFeatures(course) {
   }
 }
 
+function positionsToRing(coords) {
+  if (!Array.isArray(coords)) return [];
+  const ring = [];
+  for (const pair of coords) {
+    if (!Array.isArray(pair) || pair.length < 2) continue;
+    const lon = finite(pair[0]);
+    const lat = finite(pair[1]);
+    if (lat == null || lon == null) continue;
+    ring.push({ lat, lon });
+  }
+  return ring;
+}
+
+function ringsFromGeoJson(geo) {
+  if (!geo || typeof geo !== 'object') return [];
+  if (geo.type === 'Polygon') {
+    const ring = positionsToRing(geo.coordinates?.[0]);
+    return ring.length >= 3 ? [ring] : [];
+  }
+  if (geo.type === 'MultiPolygon') {
+    return (geo.coordinates || [])
+      .map((poly) => positionsToRing(poly?.[0]))
+      .filter((ring) => ring.length >= 3);
+  }
+  if (geo.type === 'LineString') {
+    const ring = positionsToRing(geo.coordinates);
+    return ring.length >= 2 ? [ring] : [];
+  }
+  return [];
+}
+
+function pointFromGeo(geo, rings) {
+  if (geo?.type === 'Point') {
+    const lon = finite(geo.coordinates?.[0]);
+    const lat = finite(geo.coordinates?.[1]);
+    if (lat != null && lon != null) return { lat, lon };
+  }
+  if (geo && finite(geo.lat) != null && finite(geo.lon ?? geo.lng) != null) {
+    return { lat: finite(geo.lat), lon: finite(geo.lon ?? geo.lng) };
+  }
+  const ring = (rings || []).find((item) => item.length);
+  if (!ring?.length) return null;
+  if (ring.length < 3) return ring[0];
+  return ringCentroid(ring);
+}
+
+function toPlayableHole(hole) {
+  const number = finite(hole?.number ?? hole?.holeNumber);
+  if (number == null || number < 1 || number > 18) return null;
+  const fairway = ringsFromGeoJson(hole.fairway);
+  const greenRings = ringsFromGeoJson(hole.green);
+  const bunkers = ringsFromGeoJson(hole.bunkers);
+  const penalty = ringsFromGeoJson(hole.penalty_areas || hole.penaltyAreas || hole.penalty);
+  const tee = pointFromGeo(hole.tee, ringsFromGeoJson(hole.tee));
+  const green = pointFromGeo(hole.green, greenRings);
+  const yards = finite(hole.yardage ?? hole.yards);
+  return {
+    number,
+    holeId: finite(hole.holeId) ?? undefined,
+    par: finite(hole.par) || (yards ? parForYards(yards) : 4),
+    yards: yards != null ? Math.round(yards) : undefined,
+    handicap: knownHandicap(hole.handicap, hole.allocation, hole.hcp, hole.strokeIndex),
+    bearingDeg: tee && green ? bearingBetween(tee, green) : 0,
+    tee,
+    green,
+    fairway,
+    greenRings,
+    bunkers,
+    water: penalty,
+    penalty,
+    generated: false,
+  };
+}
+
 async function writeGeometry(record) {
   const compact = {
     key: record.key,
     courseId: record.courseId || '',
+    publicId: record.publicId || '',
     courseName: record.courseName || '',
     lat: record.lat,
     lon: record.lon,
+    source: record.source || '',
     generated: Boolean(record.generated),
     holes: record.holes || [],
     placements: record.placements || {},
@@ -694,6 +770,46 @@ async function fetchHoleFeatures(lat, lon, signal) {
   return parseHoleElements(await response.json());
 }
 
+export async function readStoredGeometry(courseOrKey) {
+  const key = typeof courseOrKey === 'string' ? courseOrKey : geometryKey(courseOrKey);
+  if (!key) return null;
+  const row = await readGeometry(key);
+  if (!row?.holes?.length) return null;
+  return withFeatures(row);
+}
+
+export async function rememberHydratedGeometry(course, normalized) {
+  const publicId = String(normalized?.publicId || course?.publicId || '').trim();
+  const lat = finite(normalized?.lat ?? course?.lat);
+  const lon = finite(normalized?.lon ?? course?.lon ?? course?.lng);
+  const anchored = {
+    ...course,
+    id: course?.id || (publicId ? `gi-${publicId}` : undefined),
+    publicId,
+    lat: lat ?? course?.lat,
+    lon: lon ?? course?.lon,
+    name: normalized?.name || course?.name,
+  };
+  const holes = (Array.isArray(normalized?.holes) ? normalized.holes : [])
+    .map((hole) => toPlayableHole(hole))
+    .filter(Boolean);
+  const record = withFeatures({
+    key: geometryKey(anchored),
+    courseId: anchored.id || publicId,
+    publicId,
+    courseName: anchored.name || '',
+    lat,
+    lon,
+    source: 'golf-intel',
+    generated: false,
+    holes,
+    placements: {},
+    fetchedAt: Date.now(),
+  });
+  await writeGeometry(record);
+  return record;
+}
+
 export async function loadPlayableGeometry(course, { signal } = {}) {
   const lat = finite(course?.lat);
   const lon = finite(course?.lon ?? course?.lng);
@@ -704,6 +820,9 @@ export async function loadPlayableGeometry(course, { signal } = {}) {
     const error = new Error('Aborted');
     error.name = 'AbortError';
     throw error;
+  }
+  if (cached?.source === 'golf-intel' && cached.holes?.length) {
+    return withFeatures(cached);
   }
 
   let fresh = [];

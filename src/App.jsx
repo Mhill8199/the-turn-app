@@ -2,7 +2,7 @@
 import JuniorStudentPassModal from './components/JuniorStudentPassModal';
 import OnCourseHoleHUD from './components/OnCourseHoleHUD';
 import VeteranOwnedBadge from './components/VeteranOwnedBadge';
-import { Sun, Moon, Shirt, Compass, Briefcase, Users, Crown, LogOut, Watch, Glasses, X, ShieldCheck, Check, Loader2, KeyRound, Copy, Sliders, UserRound } from 'lucide-react';
+import { Sun, Moon, Shirt, Compass, Briefcase, Users, Handshake, Crown, LogOut, Watch, Glasses, X, ShieldCheck, Check, Loader2, KeyRound, Copy, Sliders, UserRound } from 'lucide-react';
 import { useTheme } from './context/ThemeContext';
 import { useAuth } from './context/AuthContext';
 import { useUnits } from './utils/distanceUnits';
@@ -12,6 +12,7 @@ import PrepWardrobe from './pages/PrepWardrobe';
 import CourseLayout from './pages/CourseLayout';
 import StockBag, { DEFAULT_CUSTOM_BAG } from './pages/StockBag';
 import FoursomeHub from './pages/FoursomeHub';
+import SocialMatching from './pages/SocialMatching';
 import AuthModal from './components/AuthModal';
 import OnboardingModal from './components/OnboardingModal';
 import BetaGateAndFeedback from './components/BetaGateAndFeedback';
@@ -80,6 +81,7 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     return params.get('invite') || params.get('crew') ? 'foursome' : 'course';
   });
+  const [socialLaunch, setSocialLaunch] = useState(null);
   const [demoPro, setDemoPro] = useState(false);
   const [paywallFeature, setPaywallFeature] = useState(null);
   const [selectedPlan, setSelectedPlan] = useState('solo');
@@ -377,6 +379,17 @@ const handleStartCheckout = async () => {
             onOpenPaywall={(feat) => { setCheckoutError(''); setPaywallFeature(feat); }}
             onOpenWearable={() => { setTokenStatus(''); setWearableOpen(true); }}
             onActiveHole={setCourseHole}
+            onOpenSocial={() => setActiveTab('social')}
+            launchRequest={socialLaunch}
+            onLaunchConsumed={() => setSocialLaunch(null)}
+          />
+        )}
+        {activeTab === 'social' && (
+          <SocialMatching
+            onLaunchRound={(lobby) => {
+              setSocialLaunch(lobby);
+              setActiveTab('course');
+            }}
           />
         )}
         {activeTab === 'bag' && <StockBag clubs={clubs} setClubs={setClubs} />}
@@ -682,13 +695,14 @@ const handleStartCheckout = async () => {
       />
 
       <nav
-        className="app-bottom-nav sticky bottom-0 z-20 border-t px-2 pt-2 pb-[env(safe-area-inset-bottom)] grid grid-cols-4 gap-1 backdrop-blur-md"
+        className="app-bottom-nav sticky bottom-0 z-20 border-t px-2 pt-2 pb-[env(safe-area-inset-bottom)] grid grid-cols-5 gap-1 backdrop-blur-md"
         style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
       >
         {[
           { id: 'course', label: t('course'), icon: Compass },
           { id: 'bag', label: t('bag'), icon: Briefcase },
           { id: 'foursome', label: t('foursome'), icon: Users },
+          { id: 'social', label: t('social'), icon: Handshake },
           { id: 'prep', label: t('prep'), icon: Shirt },
         ].map((tab) => {
           const Icon = tab.icon;
@@ -697,7 +711,7 @@ const handleStartCheckout = async () => {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className="min-h-[44px] flex flex-col items-center justify-center py-1.5 rounded-xl text-xs font-medium transition"
+              className="min-h-[44px] flex flex-col items-center justify-center py-1.5 rounded-xl text-[10px] font-medium leading-tight text-center transition"
               style={{ color: active ? 'var(--accent-emerald)' : 'var(--text-secondary)' }}
             >
               <Icon size={18} className="mb-1" />

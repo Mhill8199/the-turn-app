@@ -14,6 +14,7 @@ export const TRANSLATIONS = {
     course: 'Course',
     bag: 'My Bag',
     foursome: 'Foursome',
+    social: 'Social',
     prep: 'Prep & Fit',
     privacy: 'Privacy Policy',
     chooseLanguage: 'Choose language',
