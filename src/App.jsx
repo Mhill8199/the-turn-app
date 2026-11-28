@@ -2,7 +2,7 @@
 import JuniorStudentPassModal from './components/JuniorStudentPassModal';
 import OnCourseHoleHUD from './components/OnCourseHoleHUD';
 import VeteranOwnedBadge from './components/VeteranOwnedBadge';
-import { Sun, Moon, Shirt, Compass, Briefcase, Users, Crown, LogIn, LogOut, Watch, Glasses, X, ShieldCheck, Check, Loader2, KeyRound, Copy, Sliders, UserRound } from 'lucide-react';
+import { Sun, Moon, Shirt, Compass, Briefcase, Users, Crown, LogOut, Watch, Glasses, X, ShieldCheck, Check, Loader2, KeyRound, Copy, Sliders, UserRound } from 'lucide-react';
 import { useTheme } from './context/ThemeContext';
 import { useAuth } from './context/AuthContext';
 import { useUnits } from './utils/distanceUnits';
@@ -87,7 +87,6 @@ export default function App() {
   const [checkoutError, setCheckoutError] = useState('');
   const [upgradeBanner, setUpgradeBanner] = useState('');
   const [pendingCrewCode, setPendingCrewCode] = useState(() => new URLSearchParams(window.location.search).get('crew') || '');
-  const [authOpen, setAuthOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [betaAccess, setBetaAccess] = useState('unknown');
   const [wearableOpen, setWearableOpen] = useState(false);
@@ -182,7 +181,6 @@ export default function App() {
     setTokenStatus('');
     if (!user) {
       setWearableOpen(false);
-      setAuthOpen(true);
       return;
     }
 
@@ -209,7 +207,6 @@ const handleStartCheckout = async () => {
 
     if (!user) {
       setPaywallFeature(null);
-      setAuthOpen(true);
       return;
     }
 
@@ -237,26 +234,6 @@ const handleStartCheckout = async () => {
     }
   };
 
-  if (authLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Loader2 size={22} className="animate-spin" style={{ color: 'var(--accent-emerald)' }} />
-      </div>
-    );
-  }
-
-  if (!user) {
-    return <AuthModal required onClose={() => {}} />;
-  }
-
-  if (window.location.pathname === '/cart-hud') {
-    return <OnCourseHoleHUD />;
-  }
-
-  if (window.location.pathname === '/hud') {
-    return <SmartGlassesHud clubs={clubs} />;
-  }
-
   if (window.location.pathname === '/privacy-policy') {
     return (
       <div className="min-h-screen max-w-xl mx-auto px-5 py-10 space-y-5">
@@ -278,6 +255,26 @@ const handleStartCheckout = async () => {
         </div>
       </div>
     );
+  }
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 size={22} className="animate-spin" style={{ color: 'var(--accent-emerald)' }} />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <AuthModal required onClose={() => {}} />;
+  }
+
+  if (window.location.pathname === '/cart-hud') {
+    return <OnCourseHoleHUD />;
+  }
+
+  if (window.location.pathname === '/hud') {
+    return <SmartGlassesHud clubs={clubs} />;
   }
 
   const studentPassActive = Boolean(studentPass?.verified) && Boolean(studentPass?.expiresAt) && new Date(studentPass.expiresAt) > new Date();
@@ -343,39 +340,25 @@ const handleStartCheckout = async () => {
 
           <LanguageSelector />
 
-          {user ? (
-            <>
-              <button
-                type="button"
-                onClick={() => setAccountOpen(true)}
-                className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2 rounded-lg border"
-                style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
-                title="Account"
-                aria-label="Account"
-              >
-                <UserRound size={15} />
-              </button>
-              <button
-                onClick={signOut}
-                className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2 rounded-lg border"
-                style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
-                title={t('signOut')}
-                aria-label={t('signOut')}
-              >
-                <LogOut size={15} />
-              </button>
-            </>
-          ) : (
-            <button
-              onClick={() => setAuthOpen(true)}
-              className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2 rounded-lg border"
-              style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
-              title={t('signIn')}
-              aria-label={t('signIn')}
-            >
-              <LogIn size={15} />
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => setAccountOpen(true)}
+            className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2 rounded-lg border"
+            style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
+            title="Account"
+            aria-label="Account"
+          >
+            <UserRound size={15} />
+          </button>
+          <button
+            onClick={signOut}
+            className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2 rounded-lg border"
+            style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
+            title={t('signOut')}
+            aria-label={t('signOut')}
+          >
+            <LogOut size={15} />
+          </button>
         </div>
       </header>
 
@@ -401,7 +384,7 @@ const handleStartCheckout = async () => {
           <FoursomeHub
             isPro={isPro}
             onOpenPaywall={(feat) => { setSelectedPlan('foursome'); setCheckoutError(''); setPaywallFeature(feat); }}
-            onRequireAuth={() => setAuthOpen(true)}
+            onRequireAuth={() => {}}
           />
         )}
         {activeTab === 'prep' && <PrepWardrobe isPro={isPro} onOpenPaywall={(feat) => { setCheckoutError(''); setPaywallFeature(feat); }} />}
