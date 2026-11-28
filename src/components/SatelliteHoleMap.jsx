@@ -8,10 +8,13 @@ import { rewriteCachedTileRequest } from '../utils/tripQueue';
 
 /**
  * Basemap choice (never log the token):
- * - VITE_MAPBOX_TOKEN non-empty → Mapbox satellite-streets-v12 (mapbox://styles/mapbox/satellite-streets-v12).
+ * - VITE_MAPBOX_TOKEN non-empty → Mapbox satellite-streets-v12. The style URL carries
+ *   access_token, and transformRequest appends it to mapbox:// and api.mapbox.com
+ *   tile, sprite, and glyph requests.
  * - Token empty → Esri World Imagery. No key. Map startup does not wait on Overpass.
  */
-const MAPBOX_STYLE = 'mapbox://styles/mapbox/satellite-streets-v12';
+const MAPBOX_STYLE = 'https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12';
+const MAPBOX_RTL_PLUGIN = 'https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-rtl-text/v0.3.0/mapbox-gl-rtl-text.js';
 const ESRI_TILES = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
 const LIBERTY_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
 
@@ -25,6 +28,21 @@ const GOLF_TAGS = ['fairway', 'hole', 'green', 'bunker', 'water_hazard'];
 
 function mapboxToken() {
   return String(import.meta.env.VITE_MAPBOX_TOKEN ?? '').trim();
+}
+
+function mapboxStyleUrl(token) {
+  return `${MAPBOX_STYLE}?access_token=${token}`;
+}
+
+/** Official Mapbox RTL plugin, lazy. A second call throws; never block map startup. */
+function installMapboxRtlPlugin() {
+  if (typeof maplibregl.setRTLTextPlugin !== 'function') return;
+  try {
+    const pending = maplibregl.setRTLTextPlugin(MAPBOX_RTL_PLUGIN, true);
+    if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+  } catch {
+    // Ignore a second-call error. Plugin failure must not block the map.
+  }
 }
 
 function withToken(url, token) {
@@ -1350,11 +1368,12 @@ export default function SatelliteHoleMap({
     let cancelled = false;
     const token = mapboxToken();
     const usingMapbox = token.length > 0;
+    if (usingMapbox) installMapboxRtlPlugin();
 
     const start = anchorRef.current || DOCUMENTED_DEFAULT;
     map = new maplibregl.Map({
         container: mapElRef.current,
-        style: usingMapbox ? MAPBOX_STYLE : esriImageryStyle(),
+        style: usingMapbox ? mapboxStyleUrl(token) : esriImageryStyle(),
         center: [start.lon, start.lat],
         zoom: 16,
         bearing: 0,
@@ -1362,7 +1381,7 @@ export default function SatelliteHoleMap({
         maxPitch: 0,
         bearingSnap: 0,
         minZoom: 12,
-        maxZoom: 19,
+        maxZoom: usingMapbox ? 22 : 19,
         fadeDuration: 0,
         attributionControl: { compact: false, customAttribution: usingMapbox ? '© Mapbox © OpenStreetMap' : 'Esri, Maxar, Earthstar Geographics' },
         transformRequest: (url) => rewriteCachedTileRequest(url).then((cached) => {
