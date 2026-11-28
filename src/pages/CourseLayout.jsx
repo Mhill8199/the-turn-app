@@ -1384,9 +1384,9 @@ export default function CourseLayout({ clubs = [], isPro = false, onOpenPaywall,
                             ? (searchingCourses ? 'Searching public, private, resort, and municipal courses...' : 'Type at least two letters to search worldwide.')
                             : 'Saved and starter courses stay available offline.'}
                       </div>
-                    ) : rows.map((course) => (
+                    ) : rows.map((course, idx) => (
                       <CourseResultButton
-                        key={`${label}-${course.id}`}
+                        key={`${label}-${course.osmId || course.id || 'course'}-${idx}`}
                         course={course}
                         origin={gpsOrigin}
                         formatDistance={formatDistance}

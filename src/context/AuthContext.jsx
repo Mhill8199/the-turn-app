@@ -14,7 +14,19 @@ export function AuthProvider({ children }) {
       .select('*')
       .eq('id', userId)
       .single();
-    if (data) setProfile(data);
+    if (data) {
+      setProfile((current) => {
+        const sameUser = !current?.id || current.id === userId;
+        if (
+          typeof data.is_beta_tester !== 'boolean' &&
+          sameUser &&
+          current?.is_beta_tester === true
+        ) {
+          return { ...data, is_beta_tester: true };
+        }
+        return data;
+      });
+    }
   };
 
   useEffect(() => {

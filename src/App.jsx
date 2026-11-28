@@ -2,7 +2,7 @@
 import JuniorStudentPassModal from './components/JuniorStudentPassModal';
 import OnCourseHoleHUD from './components/OnCourseHoleHUD';
 import VeteranOwnedBadge from './components/VeteranOwnedBadge';
-import { Sun, Moon, Shirt, Compass, Briefcase, Users, Crown, LogIn, LogOut, Watch, Glasses, X, ShieldCheck, Check, Loader2, KeyRound, Copy, Sliders } from 'lucide-react';
+import { Sun, Moon, Shirt, Compass, Briefcase, Users, Crown, LogIn, LogOut, Watch, Glasses, X, ShieldCheck, Check, Loader2, KeyRound, Copy, Sliders, UserRound } from 'lucide-react';
 import { useTheme } from './context/ThemeContext';
 import { useAuth } from './context/AuthContext';
 import { useUnits } from './utils/distanceUnits';
@@ -72,7 +72,7 @@ function SmartGlassesHud({ clubs }) {
 
 export default function App() {
   const { theme, toggleTheme } = useTheme();
-  const { user, profile, signOut, refreshProfile } = useAuth();
+  const { user, profile, loading: authLoading, signOut, refreshProfile } = useAuth();
   const { distanceUnit, toggleDistanceUnit, tabularNumsClass } = useUnits();
   const { t } = useLanguage();
   const [courseHole, setCourseHole] = useState(null);
@@ -88,6 +88,8 @@ export default function App() {
   const [upgradeBanner, setUpgradeBanner] = useState('');
   const [pendingCrewCode, setPendingCrewCode] = useState(() => new URLSearchParams(window.location.search).get('crew') || '');
   const [authOpen, setAuthOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [betaAccess, setBetaAccess] = useState('unknown');
   const [wearableOpen, setWearableOpen] = useState(false);
   const [tokenCopied, setTokenCopied] = useState(false);
   const [tokenStatus, setTokenStatus] = useState('');
@@ -138,6 +140,13 @@ export default function App() {
       window.history.replaceState({}, '', window.location.pathname);
     }
   }, [refreshProfile]);
+
+  useEffect(() => {
+    if (authLoading || user) return;
+    const path = window.location.pathname;
+    if (path === '/privacy-policy' || path === '/hud') return;
+    setAuthOpen(true);
+  }, [authLoading, user]);
 
   useEffect(() => {
     if (!pendingCrewCode) return;
@@ -317,15 +326,27 @@ const handleStartCheckout = async () => {
           <LanguageSelector />
 
           {user ? (
-            <button
-              onClick={signOut}
-              className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2 rounded-lg border"
-              style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
-              title={t('signOut')}
-              aria-label={t('signOut')}
-            >
-              <LogOut size={15} />
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => setAccountOpen(true)}
+                className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2 rounded-lg border"
+                style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
+                title="Account"
+                aria-label="Account"
+              >
+                <UserRound size={15} />
+              </button>
+              <button
+                onClick={signOut}
+                className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2 rounded-lg border"
+                style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}
+                title={t('signOut')}
+                aria-label={t('signOut')}
+              >
+                <LogOut size={15} />
+              </button>
+            </>
           ) : (
             <button
               onClick={() => setAuthOpen(true)}
@@ -400,6 +421,42 @@ const handleStartCheckout = async () => {
       )}
 
       {authOpen && <AuthModal onClose={() => setAuthOpen(false)} />}
+
+      {accountOpen && user && (
+        <div className="fixed inset-0 z-[70] bg-black/70 flex items-end sm:items-center justify-center p-4" onClick={() => setAccountOpen(false)}>
+          <div
+            className="w-full max-w-md rounded-3xl p-5 border space-y-4"
+            style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h2 className="font-bold text-base">Account</h2>
+              <button type="button" onClick={() => setAccountOpen(false)} className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center" aria-label="Close account">
+                <X size={18} />
+              </button>
+            </div>
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+              Signed in as {user.email}
+            </p>
+            {betaAccess === 'full' && (
+              <div className="rounded-2xl border p-3 space-y-1" style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-elevated)' }}>
+                <h3 className="text-sm font-bold">Beta Cohort Full — Join Waitlist</h3>
+                <p className="text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+                  Founding beta spots are assigned from your account. This profile is on the waitlist, and the rest of The Turn stays open.
+                </p>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => { setAccountOpen(false); signOut(); }}
+              className="w-full min-h-[44px] rounded-2xl border text-sm font-semibold"
+              style={{ borderColor: 'var(--border-subtle)' }}
+            >
+              {t('signOut')}
+            </button>
+          </div>
+        </div>
+      )}
 
       {scorecardOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 overflow-y-auto">
@@ -622,7 +679,7 @@ const handleStartCheckout = async () => {
       <BetaGateAndFeedback
         activeTab={activeTab}
         holeNumber={activeTab === 'course' ? courseHole : null}
-        onRequireAuth={() => setAuthOpen(true)}
+        onBetaAccess={setBetaAccess}
       />
 
       <nav
