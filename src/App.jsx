@@ -17,7 +17,7 @@ import OnboardingModal from './components/OnboardingModal';
 import BetaGateAndFeedback from './components/BetaGateAndFeedback';
 import DeleteAccountSection from './components/DeleteAccountSection';
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 function SmartGlassesHud({ clubs }) {
   const [targetYards, setTargetYards] = useState(165);
@@ -141,18 +141,24 @@ export default function App() {
     }
   }, [refreshProfile]);
 
+  const previousUserIdRef = useRef(user?.id ?? null);
   useEffect(() => {
-    if (authLoading || user) return;
-    const path = window.location.pathname;
-    if (path === '/privacy-policy' || path === '/hud') return;
-    setAuthOpen(true);
-  }, [authLoading, user]);
+    const previous = previousUserIdRef.current;
+    const next = user?.id ?? null;
+    if (previous && !next) {
+      try {
+        localStorage.removeItem(`the-turn-beta-unlocked:${previous}`);
+      } catch {
+        /* storage can be blocked */
+      }
+    }
+    previousUserIdRef.current = next;
+  }, [user?.id]);
 
   useEffect(() => {
     if (!pendingCrewCode) return;
     if (!user?.id) {
       setUpgradeBanner(`Sign in or create a free account to claim your Tour Pro seat (${pendingCrewCode}).`);
-      setAuthOpen(true);
       return;
     }
 
@@ -230,6 +236,18 @@ const handleStartCheckout = async () => {
       setCheckoutLoading(false);
     }
   };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 size={22} className="animate-spin" style={{ color: 'var(--accent-emerald)' }} />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <AuthModal required onClose={() => {}} />;
+  }
 
   if (window.location.pathname === '/cart-hud') {
     return <OnCourseHoleHUD />;
@@ -419,8 +437,6 @@ const handleStartCheckout = async () => {
           onClose={() => { localStorage.setItem('the-turn-onboarded', 'true'); setOnboardingOpen(false); }}
         />
       )}
-
-      {authOpen && <AuthModal onClose={() => setAuthOpen(false)} />}
 
       {accountOpen && user && (
         <div className="fixed inset-0 z-[70] bg-black/70 flex items-end sm:items-center justify-center p-4" onClick={() => setAccountOpen(false)}>

@@ -2,7 +2,7 @@
 import { X, Mail, Lock, User } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
-export default function AuthModal({ onClose }) {
+export default function AuthModal({ onClose, required = false }) {
   const { signInWithEmail, signUpWithEmail } = useAuth();
   const [isSignUp, setIsSignUp] = useState(false);
   const [displayName, setDisplayName] = useState('');
@@ -39,7 +39,9 @@ export default function AuthModal({ onClose }) {
       >
         <div className="flex items-center justify-between">
           <h3 className="font-bold text-base">{isSignUp ? 'Join The Turn' : 'Sign In to The Turn'}</h3>
-          <button type="button" onClick={onClose} className="p-1 opacity-75 hover:opacity-100"><X size={18} /></button>
+          {!required && (
+            <button type="button" onClick={onClose} className="p-1 opacity-75 hover:opacity-100" aria-label="Close"><X size={18} /></button>
+          )}
         </div>
 
         {isSignUp && (

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, MessageSquare, X } from 'lucide-react';
+import { MessageSquare, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 
@@ -49,15 +49,6 @@ function clearUserUnlock(userId) {
   if (!userId) return;
   try {
     localStorage.removeItem(userUnlockKey(userId));
-  } catch {
-    /* ignore */
-  }
-}
-
-function clearLegacyUnlockKeys() {
-  try {
-    localStorage.removeItem(LEGACY_UNLOCK_KEY);
-    localStorage.removeItem(OLDER_UNLOCK_KEY);
   } catch {
     /* ignore */
   }
@@ -142,10 +133,12 @@ export default function BetaGateAndFeedback({ activeTab, holeNumber = null, onBe
   useEffect(() => {
     const previous = userIdRef.current;
     const next = user?.id ?? null;
-    if (previous && previous !== next) {
+    if (previous && !next) {
       clearUserUnlock(previous);
-      clearLegacyUnlockKeys();
-      setAccess(next ? 'verifying' : 'signed_out');
+      setAccess('signed_out');
+    } else if (previous && previous !== next) {
+      clearUserUnlock(previous);
+      setAccess('verifying');
     }
     userIdRef.current = next;
   }, [user?.id]);
@@ -248,21 +241,11 @@ export default function BetaGateAndFeedback({ activeTab, holeNumber = null, onBe
 
   const cachedForUser = Boolean(user?.id && readUserUnlock(user.id) && access !== 'full');
   const tester = Boolean(user?.id) && (access === 'tester' || profile?.is_beta_tester === true || cachedForUser);
-  const verifying = Boolean(user?.id) && !tester && access === 'verifying';
+
+  if (!tester) return null;
 
   return (
     <>
-      {verifying && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75">
-          <div className="w-full max-w-sm rounded-3xl border p-5 space-y-3 text-center" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
-            <Loader2 size={22} className="mx-auto animate-spin" style={{ color: 'var(--accent-emerald)' }} />
-            <p className="text-sm font-semibold">Verifying beta access...</p>
-          </div>
-        </div>
-      )}
-
-      {tester && (
-        <>
           <button
             type="button"
             onClick={() => {
@@ -323,8 +306,6 @@ export default function BetaGateAndFeedback({ activeTab, holeNumber = null, onBe
               </form>
             </div>
           )}
-        </>
-      )}
     </>
   );
 }
